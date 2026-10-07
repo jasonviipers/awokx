@@ -1,0 +1,106 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "viipers",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-03",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "workers_dev": true,
+  "routes": [
+    {
+      "pattern": "viipers.com",
+      "custom_domain": true
+    }
+  ],
+  "assets": {
+    "directory": "./dashboard/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": [
+      "/*"
+    ]
+  },
+  "vars": {
+    "ENVIRONMENT": "production",
+    "FEATURE_LLM_RESEARCH": "true",
+    "FEATURE_OPTIONS": "true",
+    "DEFAULT_MAX_POSITION_PCT": "0.10",
+    "DEFAULT_MAX_NOTIONAL_PER_TRADE": "5000",
+    "DEFAULT_MAX_DAILY_LOSS_PCT": "0.02",
+    "DEFAULT_COOLDOWN_MINUTES": "30",
+    "DEFAULT_MAX_OPEN_POSITIONS": "10",
+    "DEFAULT_APPROVAL_TTL_SECONDS": "300",
+    "BROKER_PROVIDER": "alpaca",
+    "OKX_SIMULATED": "false",
+    "PUBLIC_DASHBOARD": "true"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "viipers-db",
+      "database_id": "76db6791-f18a-4b28-8136-34f02be4fecd",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "CACHE",
+      "id": "be18569a27e54f10a73901a6975f02d1"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "ARTIFACTS",
+      "bucket_name": "viipers-artifacts"
+    }
+  ],
+  "ratelimits": [
+    {
+      "name": "PUBLIC_RATE_LIMITER",
+      "namespace_id": "1001",
+      "simple": {
+        "limit": 60,
+        "period": 60
+      }
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "SESSION",
+        "class_name": "SessionDO"
+      },
+      {
+        "name": "VIIPERS_HARNESS",
+        "class_name": "ViipersHarness"
+      },
+      {
+        "name": "MCP_AGENT",
+        "class_name": "ViipersMcpAgent"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "SessionDO",
+        "ViipersMcpAgent",
+        "ViipersHarness"
+      ]
+    }
+  ],
+  "triggers": {
+    "crons": [
+      "*/5 13-20 * * 1-5",
+      "0 14 * * 1-5",
+      "30 21 * * 1-5",
+      "0 5 * * *",
+      "0 * * * *"
+    ]
+  },
+  "build": {
+    "command": "bun run build"
+  }
+}

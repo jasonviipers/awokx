@@ -89,8 +89,51 @@ npx wrangler secret put KILL_SWITCH_SECRET   # Emergency kill switch (separate f
 
 ### 4. Deploy
 
+Pushes to `main` or `master` run GitHub Actions checks, build the dashboard,
+apply pending D1 migrations, and deploy the Worker and dashboard to **https://viipers.com**.
+Pull requests run checks without deploying. You can also use **Actions → CI and
+Cloudflare deployment → Run workflow** on a production branch.
+
+The deployment uses the tracked `wrangler.deploy.json`, which references the existing
+`viipers-db`, VIIPERS_CACHE namespace (bound as CACHE) and `viipers-artifacts` bucket. Resource IDs are configuration,
+not credentials. Keep API keys in Cloudflare Worker secrets and local secret files
+out of Git. The ignored local `wrangler.json` is for development.
+
+One-time GitHub setup: open [repository Actions secrets](https://github.com/jasonviipers/awokx/settings/secrets/actions)
+and add `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`. The account ID has already
+been configured for this repository. Create a Cloudflare token using the **Edit
+Cloudflare Workers** template, scoped to your account and the `viipers.com` zone;
+include access to the configured D1, KV and R2 resources and custom-domain routing.
+In particular, **Account → D1 → Edit** is required for the migration step; the
+default Workers token template may not include it.
+See [Cloudflare's GitHub Actions authentication instructions](https://developers.cloudflare.com/workers/ci-cd/external-cicd/github-actions/).
+
+`viipers.com` must remain an active zone in that account. The deployment config
+declares it as a [Worker Custom Domain](https://developers.cloudflare.com/workers/configuration/routing/custom-domains/).
+The first CI deployment replaces its current `maintenance` Worker binding with `viipers`.
+The documentation site has the separate Worker name `viipers-docs` so deploying it
+cannot overwrite the trading app.
+
+The `viipers` Worker has been provisioned with the existing runtime secrets as
+encrypted Cloudflare secrets. When updating them locally, first map the Alpaca
+variable names described below, then use:
+
 ```bash
-npx wrangler deploy
+bunx wrangler secret bulk .dev.vars --config wrangler.deploy.json
+```
+
+Use `ALPACA_API_KEY` and `ALPACA_API_SECRET` for the deployed Worker. Local names
+`ALPACA_API_KEY_ID` and `ALPACA_API_SECRET_KEY` must be mapped to those names before
+uploading. `VIIPERS_API_TOKEN` and `KILL_SWITCH_SECRET` are required for protected actions.
+Updating application code preserves existing Worker secrets.
+
+For a manual deployment, build the dashboard first:
+
+```bash
+bun install --frozen-lockfile
+bun install --cwd dashboard --frozen-lockfile
+bun run --cwd dashboard build
+bun run deploy
 ```
 
 ### 5. Enable the agent

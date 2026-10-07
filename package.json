@@ -6,10 +6,10 @@
   "scripts": {
     "dev": "wrangler dev",
     "build": "tsc",
-    "deploy": "wrangler deploy",
-    "deploy:production": "wrangler deploy --env production",
+    "deploy": "wrangler deploy --config wrangler.deploy.json",
+    "deploy:production": "bun run deploy",
     "db:migrate": "wrangler d1 migrations apply viipers-db --local",
-    "db:migrate:remote": "wrangler d1 migrations apply viipers-db --remote",
+    "db:migrate:remote": "wrangler d1 migrations apply DB --remote --config wrangler.deploy.json",
     "db:studio": "wrangler d1 execute viipers-db --local --command 'SELECT 1'",
     "typecheck": "tsc --noEmit",
     "lint": "biome lint src/",

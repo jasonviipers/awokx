@@ -1,12 +1,12 @@
-import { getHarnessStub } from "./durable-objects/viipers-harness";
 import { consumeRateLimit } from "./durable-objects/session";
+import { getHarnessStub } from "./durable-objects/viipers-harness";
 import type { Env } from "./env.d";
 import { handleCronEvent } from "./jobs/cron";
 import { constantTimeCompare, parseBoolean } from "./lib/utils";
 import { ViipersMcpAgent } from "./mcp/agent";
 
-export { ViipersHarness } from "./durable-objects/viipers-harness";
 export { SessionDO } from "./durable-objects/session";
+export { ViipersHarness } from "./durable-objects/viipers-harness";
 export { ViipersMcpAgent };
 
 function isAuthorized(request: Request, env: Env): boolean {
