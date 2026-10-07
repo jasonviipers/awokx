@@ -331,7 +331,7 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-hud-bg">
+    <main className="min-h-screen bg-hud-bg">
       <div className="max-w-[1920px] mx-auto p-4">
         <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-4 pb-3 border-b border-hud-line">
           <div className="flex items-center gap-4 md:gap-6">
@@ -498,7 +498,7 @@ export default function App() {
                               pos.unrealized_pl >= 0 ? 'text-hud-success' : 'text-hud-error'
                             )}>
                               <div>{formatCurrency(pos.unrealized_pl)}</div>
-                              <div className="text-xs opacity-70">{formatPercent(plPct)}</div>
+                              <div className="text-xs">{formatPercent(plPct)}</div>
                             </td>
                           </motion.tr>
                         )
@@ -537,7 +537,7 @@ export default function App() {
                       key={p}
                       onClick={() => setPortfolioPeriod(p)}
                       className={clsx(
-                        'hud-label transition-colors',
+                        'hud-label transition-colors min-w-6 min-h-6',
                         portfolioPeriod === p ? 'text-hud-primary' : 'text-hud-text-dim hover:text-hud-text'
                       )}
                     >
@@ -885,6 +885,6 @@ export default function App() {
           </div>
         </div>
       )}
-    </div>
+    </main>
   )
 }

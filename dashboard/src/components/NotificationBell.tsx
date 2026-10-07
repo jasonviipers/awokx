@@ -50,6 +50,8 @@ export function NotificationBell({ overnightActivity, premarketPlan }: Notificat
     <div ref={containerRef} className="relative">
       <button
         onClick={() => setIsOpen(!isOpen)}
+        aria-label="Notifications"
+        aria-expanded={isOpen}
         className={clsx(
           'relative p-2 transition-colors',
           isOpen ? 'text-hud-primary' : 'text-hud-text-dim hover:text-hud-text'
