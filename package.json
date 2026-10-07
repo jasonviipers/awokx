@@ -22,7 +22,9 @@
     "test:run": "vitest run",
     "setup:access": "bun scripts/setup-access.ts",
     "audit:unused": "bun scripts/audit-unused.mjs",
-    "audit:security": "bun audit"
+    "audit:security": "bun audit",
+    "secrets:push": "cp .env .dev.vars && wrangler secret bulk .env",
+    "secrets:push:production": "wrangler secret bulk .env --env production"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.74",
