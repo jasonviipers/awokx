@@ -1,6 +1,6 @@
 {
 	"$schema": "https://raw.githubusercontent.com/cloudflare/workers-sdk/main/packages/wrangler/config-schema.json",
-	"name": "mahoraga",
+	"name": "viipers",
 	"main": "src/index.ts",
 	"compatibility_date": "2024-12-01",
 	"compatibility_flags": [
@@ -17,14 +17,14 @@
 		"DEFAULT_MAX_OPEN_POSITIONS": "10",
 		"DEFAULT_APPROVAL_TTL_SECONDS": "300",
 		// "true" = anyone can view status, P&L, trades and activity read-only at /
-		// (config and controls still require MAHORAGA_API_TOKEN)
+		// (config and controls still require VIIPERS_API_TOKEN)
 		"PUBLIC_DASHBOARD": "false"
 	},
 	// Secrets (set via `wrangler secret put <NAME>`):
 	// Required:
 	// - ALPACA_API_KEY
 	// - ALPACA_API_SECRET
-	// - MAHORAGA_API_TOKEN (API authentication - generate with: openssl rand -base64 48)
+	// - VIIPERS_API_TOKEN (API authentication - generate with: openssl rand -base64 48)
 	// - KILL_SWITCH_SECRET (emergency kill switch + approval token signing)
 	//
 	// Broker (default: alpaca). To trade crypto spot on OKX set var BROKER_PROVIDER=okx and:
@@ -55,7 +55,7 @@
 	"d1_databases": [
 		{
 			"binding": "DB",
-			"database_name": "mahoraga-db",
+			"database_name": "viipers-db",
 			"database_id": "<YOUR_D1_DATABASE_ID>",
 			"migrations_dir": "migrations"
 		}
@@ -69,7 +69,7 @@
 	"r2_buckets": [
 		{
 			"binding": "ARTIFACTS",
-			"bucket_name": "mahoraga-artifacts"
+			"bucket_name": "viipers-artifacts"
 		}
 	],
 	// Per-IP limit for the public read-only API (/api/public/*)
@@ -84,11 +84,11 @@
 			},
 			{
 				"name": "MCP_AGENT",
-				"class_name": "MahoragaMcpAgent"
+				"class_name": "ViipersMcpAgent"
 			},
 			{
-				"name": "MAHORAGA_HARNESS",
-				"class_name": "MahoragaHarness"
+				"name": "VIIPERS_HARNESS",
+				"class_name": "ViipersHarness"
 			}
 		]
 	},
@@ -97,8 +97,8 @@
 			"tag": "v1",
 			"new_sqlite_classes": [
 				"SessionDO",
-				"MahoragaMcpAgent",
-				"MahoragaHarness"
+				"ViipersMcpAgent",
+				"ViipersHarness"
 			]
 		}
 	],

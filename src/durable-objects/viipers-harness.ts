@@ -1,5 +1,5 @@
 /**
- * MahoragaHarness — Thin Orchestrator
+ * ViipersHarness — Thin Orchestrator
  *
  * This Durable Object is the core scheduler: it runs alarm() every 30s,
  * delegates data gathering, research, and trading decisions to the active
@@ -66,7 +66,7 @@ const PUBLIC_STATUS_TTL_MS = 10_000;
 const PUBLIC_TRADES_TTL_MS = 30_000;
 const PUBLIC_HISTORY_TTL_MS = 60_000;
 
-export class MahoragaHarness extends DurableObject<Env> {
+export class ViipersHarness extends DurableObject<Env> {
   private state: AgentState = { ...DEFAULT_STATE };
   private _llm: LLMProvider | null = null;
   private _etDayFormatter: Intl.DateTimeFormat | null = null;
@@ -80,9 +80,9 @@ export class MahoragaHarness extends DurableObject<Env> {
 
     this._llm = createLLMProvider(env);
     if (this._llm) {
-      console.log(`[MahoragaHarness] LLM Provider initialized: ${env.LLM_PROVIDER || "openai-raw"}`);
+      console.log(`[ViipersHarness] LLM Provider initialized: ${env.LLM_PROVIDER || "openai-raw"}`);
     } else {
-      console.log("[MahoragaHarness] WARNING: No valid LLM provider configured - research disabled");
+      console.log("[ViipersHarness] WARNING: No valid LLM provider configured - research disabled");
     }
 
     this.ctx.blockConcurrencyWhile(async () => {
@@ -115,9 +115,9 @@ export class MahoragaHarness extends DurableObject<Env> {
 
     this._llm = createLLMProvider(effectiveEnv);
     if (this._llm) {
-      console.log(`[MahoragaHarness] LLM Provider initialized: ${provider} (${model})`);
+      console.log(`[ViipersHarness] LLM Provider initialized: ${provider} (${model})`);
     } else {
-      console.log("[MahoragaHarness] WARNING: No valid LLM provider configured");
+      console.log("[ViipersHarness] WARNING: No valid LLM provider configured");
     }
   }
 
@@ -1111,9 +1111,9 @@ export class MahoragaHarness extends DurableObject<Env> {
   // ============================================================================
 
   private isAuthorized(request: Request): boolean {
-    const token = this.env.MAHORAGA_API_TOKEN;
+    const token = this.env.VIIPERS_API_TOKEN;
     if (!token) {
-      console.warn("[MahoragaHarness] MAHORAGA_API_TOKEN not set - denying request");
+      console.warn("[ViipersHarness] VIIPERS_API_TOKEN not set - denying request");
       return false;
     }
     const authHeader = request.headers.get("Authorization");
@@ -1131,7 +1131,7 @@ export class MahoragaHarness extends DurableObject<Env> {
 
   private unauthorizedResponse(): Response {
     return new Response(
-      JSON.stringify({ error: "Unauthorized. Requires: Authorization: Bearer <MAHORAGA_API_TOKEN>" }),
+      JSON.stringify({ error: "Unauthorized. Requires: Authorization: Bearer <VIIPERS_API_TOKEN>" }),
       { status: 401, headers: { "Content-Type": "application/json" } }
     );
   }
@@ -1534,7 +1534,7 @@ export class MahoragaHarness extends DurableObject<Env> {
           ],
           description: "High sentiment detected, researching...",
           timestamp: new Date().toISOString(),
-          footer: { text: "MAHORAGA • Not financial advice • DYOR" },
+          footer: { text: "VIIPERS • Not financial advice • DYOR" },
         };
       } else {
         const verdictEmoji = data.verdict === "BUY" ? "✅" : data.verdict === "SKIP" ? "⏭️" : "⏸️";
@@ -1549,7 +1549,7 @@ export class MahoragaHarness extends DurableObject<Env> {
             { name: "Sentiment", value: `${((data.sentiment || 0) * 100).toFixed(0)}%`, inline: true },
           ],
           timestamp: new Date().toISOString(),
-          footer: { text: "MAHORAGA • Not financial advice • DYOR" },
+          footer: { text: "VIIPERS • Not financial advice • DYOR" },
         };
 
         if (data.reasoning) {
@@ -1586,9 +1586,9 @@ export class MahoragaHarness extends DurableObject<Env> {
 // ============================================================================
 
 export function getHarnessStub(env: Env): DurableObjectStub {
-  if (!env.MAHORAGA_HARNESS) {
-    throw new Error("MAHORAGA_HARNESS binding not configured - check wrangler.toml");
+  if (!env.VIIPERS_HARNESS) {
+    throw new Error("VIIPERS_HARNESS binding not configured - check wrangler.toml");
   }
-  const id = env.MAHORAGA_HARNESS.idFromName("main");
-  return env.MAHORAGA_HARNESS.get(id);
+  const id = env.VIIPERS_HARNESS.idFromName("main");
+  return env.VIIPERS_HARNESS.get(id);
 }

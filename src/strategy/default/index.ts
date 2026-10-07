@@ -1,7 +1,7 @@
 /**
  * Default Strategy — "sentiment-momentum"
  *
- * This is the built-in strategy that ships with Mahoraga.
+ * This is the built-in strategy that ships with Viipers.
  * It replicates the original harness behavior:
  *   - Gatherers: StockTwits, Reddit, SEC, Crypto
  *   - Research: LLM-powered signal and position analysis

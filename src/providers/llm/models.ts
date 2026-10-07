@@ -1,5 +1,5 @@
 /**
- * Single source of truth for the LLMs MAHORAGA offers.
+ * Single source of truth for the LLMs VIIPERS offers.
  *
  * The dashboard model pickers (GET /agent/models), the AI SDK provider list, request
  * shaping (temperature / token limits) and LLM cost tracking all read from here.

@@ -39,9 +39,9 @@ import { createTrade } from "../storage/d1/queries/trades";
 import type { OptionsOrderPreview } from "./types";
 import { failure, success } from "./types";
 
-export class MahoragaMcpAgent extends McpAgent<Env> {
+export class ViipersMcpAgent extends McpAgent<Env> {
   server = new McpServer({
-    name: "mahoraga",
+    name: "viipers",
     version: "0.1.0",
   });
 
@@ -814,9 +814,9 @@ export class MahoragaMcpAgent extends McpAgent<Env> {
   }
 
   private registerUtilityTools() {
-    this.server.tool("help-usage", "Get help information about using Mahoraga", {}, async () => {
+    this.server.tool("help-usage", "Get help information about using Viipers", {}, async () => {
       const result = success({
-        name: "Mahoraga MCP Trading Server",
+        name: "Viipers MCP Trading Server",
         version: "0.1.0",
         order_flow: ["1. orders-preview -> get approval_token", "2. orders-submit with token"],
         quick_start: ["auth-verify", "portfolio-get", "risk-status", "orders-preview", "orders-submit"],

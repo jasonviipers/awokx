@@ -25,14 +25,14 @@ export interface ToolError {
   details?: unknown;
 }
 
-export class MahoragaError extends Error {
+export class ViipersError extends Error {
   constructor(
     public readonly code: ErrorCode,
     message: string,
     public readonly details?: unknown
   ) {
     super(message);
-    this.name = "MahoragaError";
+    this.name = "ViipersError";
   }
 
   toToolError(): ToolError {
@@ -44,6 +44,6 @@ export class MahoragaError extends Error {
   }
 }
 
-export function createError(code: ErrorCode, message: string, details?: unknown): MahoragaError {
-  return new MahoragaError(code, message, details);
+export function createError(code: ErrorCode, message: string, details?: unknown): ViipersError {
+  return new ViipersError(code, message, details);
 }

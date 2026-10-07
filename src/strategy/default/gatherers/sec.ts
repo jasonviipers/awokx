@@ -35,7 +35,7 @@ async function resolveTickerFromCompanyName(companyName: string): Promise<string
 
   try {
     const response = await fetch("https://www.sec.gov/files/company_tickers.json", {
-      headers: { "User-Agent": "Mahoraga Trading Bot" },
+      headers: { "User-Agent": "Viipers Trading Bot" },
     });
 
     if (!response.ok) return null;
@@ -75,7 +75,7 @@ async function gatherSECFilings(ctx: StrategyContext): Promise<Signal[]> {
       "https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent&type=8-K&company=&dateb=&owner=include&count=40&output=atom",
       {
         headers: {
-          "User-Agent": "Mahoraga Trading Bot (contact@example.com)",
+          "User-Agent": "Viipers Trading Bot (contact@example.com)",
           Accept: "application/atom+xml",
         },
       }

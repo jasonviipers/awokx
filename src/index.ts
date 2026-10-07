@@ -1,16 +1,16 @@
-import { getHarnessStub } from "./durable-objects/mahoraga-harness";
+import { getHarnessStub } from "./durable-objects/viipers-harness";
 import { consumeRateLimit } from "./durable-objects/session";
 import type { Env } from "./env.d";
 import { handleCronEvent } from "./jobs/cron";
 import { constantTimeCompare, parseBoolean } from "./lib/utils";
-import { MahoragaMcpAgent } from "./mcp/agent";
+import { ViipersMcpAgent } from "./mcp/agent";
 
-export { MahoragaHarness } from "./durable-objects/mahoraga-harness";
+export { ViipersHarness } from "./durable-objects/viipers-harness";
 export { SessionDO } from "./durable-objects/session";
-export { MahoragaMcpAgent };
+export { ViipersMcpAgent };
 
 function isAuthorized(request: Request, env: Env): boolean {
-  const token = env.MAHORAGA_API_TOKEN;
+  const token = env.VIIPERS_API_TOKEN;
   if (!token) return false;
   const authHeader = request.headers.get("Authorization");
   if (!authHeader?.startsWith("Bearer ")) return false;
@@ -18,7 +18,7 @@ function isAuthorized(request: Request, env: Env): boolean {
 }
 
 function unauthorizedResponse(): Response {
-  return new Response(JSON.stringify({ error: "Unauthorized. Requires: Authorization: Bearer <MAHORAGA_API_TOKEN>" }), {
+  return new Response(JSON.stringify({ error: "Unauthorized. Requires: Authorization: Bearer <VIIPERS_API_TOKEN>" }), {
     status: 401,
     headers: { "Content-Type": "application/json" },
   });
@@ -96,7 +96,7 @@ export default {
       }
       return new Response(
         JSON.stringify({
-          name: "mahoraga",
+          name: "viipers",
           version: "0.3.0",
           description: "Autonomous LLM-powered trading agent on Cloudflare Workers",
           endpoints: {
@@ -120,7 +120,7 @@ export default {
       const rateCheck = await consumeRateLimit(env, "admin-api");
       if (!rateCheck.allowed)
         return Response.json({ error: "Rate limit exceeded", resetAt: rateCheck.resetAt }, { status: 429 });
-      return MahoragaMcpAgent.mount("/mcp", { binding: "MCP_AGENT" }).fetch(request, env, ctx);
+      return ViipersMcpAgent.mount("/mcp", { binding: "MCP_AGENT" }).fetch(request, env, ctx);
     }
 
     // Read-only spectator API (/api/public/*). Opt-in, unauthenticated, GET-only.
@@ -130,7 +130,7 @@ export default {
 
     if (url.pathname === "/agent" || url.pathname.startsWith("/agent/")) {
       // /agent/kill is authorized by KILL_SWITCH_SECRET inside the harness, so it
-      // must not also require MAHORAGA_API_TOKEN (the two secrets are distinct).
+      // must not also require VIIPERS_API_TOKEN (the two secrets are distinct).
       const isKill = url.pathname === "/agent/kill";
       if (!isKill && !isAuthorized(request, env)) {
         return unauthorizedResponse();

@@ -1,6 +1,6 @@
 import type { Config } from './types'
 
-const TOKEN_KEY = 'mahoraga_api_token'
+const TOKEN_KEY = 'viipers_api_token'
 
 /** API origin + prefix. Override with VITE_API_BASE to host the dashboard on another site. */
 export const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined)?.replace(/\/+$/, '') || '/api'

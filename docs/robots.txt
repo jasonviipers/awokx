@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://mahoraga.dev/sitemap.xml
+Sitemap: https://viipers.dev/sitemap.xml

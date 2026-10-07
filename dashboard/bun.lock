@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "mahoraga-dashboard",
+      "name": "viipers-dashboard",
       "dependencies": {
         "clsx": "^2.1.1",
         "motion": "^14.0.0",

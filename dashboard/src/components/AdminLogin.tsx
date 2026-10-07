@@ -24,7 +24,7 @@ export function AdminLogin({ onCancel }: AdminLoginProps) {
         type="password"
         autoComplete="current-password"
         className="hud-input w-full"
-        placeholder="Enter MAHORAGA_API_TOKEN"
+        placeholder="Enter VIIPERS_API_TOKEN"
         value={token}
         onChange={(e) => setToken(e.target.value)}
         autoFocus

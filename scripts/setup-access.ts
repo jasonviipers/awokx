@@ -2,21 +2,21 @@
 /**
  * Cloudflare Access Setup Script
  * 
- * Sets up Cloudflare Access to protect your MAHORAGA worker endpoints.
+ * Sets up Cloudflare Access to protect your VIIPERS worker endpoints.
  * This provides SSO, email verification, or one-time PIN authentication.
  * 
  * Required environment variables:
  *   CLOUDFLARE_API_TOKEN - API token with Access:Edit permissions
  *   CLOUDFLARE_ACCOUNT_ID - Your Cloudflare account ID
- *   MAHORAGA_WORKER_URL - Your worker URL (e.g., https://mahoraga.your-subdomain.workers.dev)
+ *   VIIPERS_WORKER_URL - Your worker URL (e.g., https://viipers.your-subdomain.workers.dev)
  * 
- *   MAHORAGA_ALLOWED_EMAILS - Comma-separated list of allowed emails
+ *   VIIPERS_ALLOWED_EMAILS - Comma-separated list of allowed emails
  * 
  * Usage:
  *   bun scripts/setup-access.ts
  * 
  * Or with environment variables inline:
- *   CLOUDFLARE_API_TOKEN=xxx CLOUDFLARE_ACCOUNT_ID=yyy MAHORAGA_WORKER_URL=https://... bun scripts/setup-access.ts
+ *   CLOUDFLARE_API_TOKEN=xxx CLOUDFLARE_ACCOUNT_ID=yyy VIIPERS_WORKER_URL=https://... bun scripts/setup-access.ts
  */
 
 const API_BASE = "https://api.cloudflare.com/client/v4";
@@ -99,7 +99,7 @@ async function createAccessPolicy(
   name: string,
   emails: string[]
 ): Promise<AccessPolicy> {
-  if (emails.length === 0) throw new Error("MAHORAGA_ALLOWED_EMAILS must contain at least one allowed email");
+  if (emails.length === 0) throw new Error("VIIPERS_ALLOWED_EMAILS must contain at least one allowed email");
   const include: AccessPolicy["include"] = emails.map((email) => ({ email: { email } }));
 
   return cfFetch<AccessPolicy>(
@@ -144,13 +144,13 @@ function extractDomain(url: string): string {
 }
 
 async function main() {
-  console.log("\n🔐 MAHORAGA Cloudflare Access Setup\n");
+  console.log("\n🔐 VIIPERS Cloudflare Access Setup\n");
 
   const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
-  const workerUrl = process.env.MAHORAGA_WORKER_URL;
-  const allowedEmails = process.env.MAHORAGA_ALLOWED_EMAILS?.split(",").map((e) => e.trim()).filter(Boolean) || [];
+  const workerUrl = process.env.VIIPERS_WORKER_URL;
+  const allowedEmails = process.env.VIIPERS_ALLOWED_EMAILS?.split(",").map((e) => e.trim()).filter(Boolean) || [];
   if (allowedEmails.length === 0) {
-    throw new Error("MAHORAGA_ALLOWED_EMAILS is required. Refusing to create an Access policy that permits everyone.");
+    throw new Error("VIIPERS_ALLOWED_EMAILS is required. Refusing to create an Access policy that permits everyone.");
   }
 
   if (!accountId) {
@@ -160,8 +160,8 @@ async function main() {
   }
 
   if (!workerUrl) {
-    console.error("❌ MAHORAGA_WORKER_URL is required");
-    console.error("   Example: https://mahoraga.your-subdomain.workers.dev");
+    console.error("❌ VIIPERS_WORKER_URL is required");
+    console.error("   Example: https://viipers.your-subdomain.workers.dev");
     process.exit(1);
   }
 
@@ -173,7 +173,7 @@ async function main() {
   }
 
   const domain = extractDomain(workerUrl);
-  const appName = "MAHORAGA Trading Agent";
+  const appName = "VIIPERS Trading Agent";
 
   console.log(`Account ID: ${accountId}`);
   console.log(`Worker URL: ${workerUrl}`);
@@ -202,7 +202,7 @@ async function main() {
 
   console.log("\n" + "=".repeat(60));
   console.log("✅ Cloudflare Access Setup Complete!\n");
-  console.log("Your MAHORAGA endpoints are now protected.");
+  console.log("Your VIIPERS endpoints are now protected.");
   console.log(`Dashboard: https://one.dash.cloudflare.com/${accountId}/access/apps/${app.id}`);
   
   console.log(`\nAuthentication: Email allowlist (${allowedEmails.length} users)`);

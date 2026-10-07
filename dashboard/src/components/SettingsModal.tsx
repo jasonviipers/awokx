@@ -35,16 +35,16 @@ export function SettingsModal({ config, onSave, onClose }: SettingsModalProps) {
   const [localConfig, setLocalConfig] = useState<Config>(config)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
-  const [apiToken, setApiToken] = useState(localStorage.getItem('mahoraga_api_token') || '')
+  const [apiToken, setApiToken] = useState(localStorage.getItem('viipers_api_token') || '')
 
   // Note: We intentionally do NOT sync localConfig with the config prop after initial mount.
   // This prevents the parent's polling (every 5s) from overwriting user's unsaved changes.
 
   const handleTokenSave = () => {
     if (apiToken) {
-      localStorage.setItem('mahoraga_api_token', apiToken)
+      localStorage.setItem('viipers_api_token', apiToken)
     } else {
-      localStorage.removeItem('mahoraga_api_token')
+      localStorage.removeItem('viipers_api_token')
     }
     window.location.reload()
   }
@@ -148,14 +148,14 @@ export function SettingsModal({ config, onSave, onClose }: SettingsModalProps) {
                 className="hud-input flex-1"
                 value={apiToken}
                 onChange={e => setApiToken(e.target.value)}
-                placeholder="Enter MAHORAGA_API_TOKEN"
+                placeholder="Enter VIIPERS_API_TOKEN"
               />
               <button className="hud-button" onClick={handleTokenSave}>
                 Save & Reload
               </button>
             </div>
             <p className="text-[9px] text-hud-text-dim mt-1">
-              Your MAHORAGA_API_TOKEN from Cloudflare secrets. Required for all API access.
+              Your VIIPERS_API_TOKEN from Cloudflare secrets. Required for all API access.
             </p>
           </div>
 

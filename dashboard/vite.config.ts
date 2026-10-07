@@ -19,7 +19,7 @@ function wranglerDevPort(): string {
 }
 
 // 127.0.0.1, not "localhost": Node resolves localhost to ::1 first, but wrangler listens on IPv4.
-const apiTarget = process.env.MAHORAGA_API_URL || `http://127.0.0.1:${process.env.WRANGLER_PORT || wranglerDevPort()}`
+const apiTarget = process.env.VIIPERS_API_URL || `http://127.0.0.1:${process.env.WRANGLER_PORT || wranglerDevPort()}`
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],

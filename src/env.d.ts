@@ -4,7 +4,7 @@ export interface Env {
   ARTIFACTS: R2Bucket;
   ASSETS?: Fetcher;
   SESSION: DurableObjectNamespace;
-  MAHORAGA_HARNESS?: DurableObjectNamespace;
+  VIIPERS_HARNESS?: DurableObjectNamespace;
 
   ALPACA_API_KEY: string;
   ALPACA_API_SECRET: string;
@@ -28,7 +28,7 @@ export interface Env {
   LLM_MODEL?: string;
   TWITTER_BEARER_TOKEN?: string;
   DISCORD_WEBHOOK_URL?: string;
-  MAHORAGA_API_TOKEN: string;
+  VIIPERS_API_TOKEN: string;
   KILL_SWITCH_SECRET: string;
 
   ENVIRONMENT: string;

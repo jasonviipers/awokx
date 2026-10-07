@@ -32,7 +32,7 @@ async function gatherReddit(ctx: StrategyContext): Promise<Signal[]> {
 
     try {
       const res = await fetch(`https://www.reddit.com/r/${sub}/hot.json?limit=25`, {
-        headers: { "User-Agent": "Mahoraga/2.0" },
+        headers: { "User-Agent": "Viipers/2.0" },
       });
       if (!res.ok) continue;
       const data = (await res.json()) as {

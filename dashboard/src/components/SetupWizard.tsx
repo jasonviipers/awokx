@@ -54,7 +54,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   if (!showInstructions) {
     return (
       <div className="min-h-screen bg-hud-bg flex items-center justify-center p-6">
-        <Panel title="MAHORAGA SETUP" className="w-full max-w-xl">
+        <Panel title="VIIPERS SETUP" className="w-full max-w-xl">
           <div className="space-y-6">
             <div className="text-center py-2">
               <h2 className="text-xl font-light text-hud-warning mb-2">Risk Disclaimer</h2>
@@ -107,7 +107,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
 
   return (
     <div className="min-h-screen bg-hud-bg flex items-center justify-center p-6">
-      <Panel title="MAHORAGA SETUP" className="w-full max-w-xl">
+      <Panel title="VIIPERS SETUP" className="w-full max-w-xl">
         <div className="space-y-6">
           <h2 className="text-xl font-light text-hud-text-bright">Configure your broker</h2>
           <p className="text-sm text-hud-text-dim">

@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "mahoraga",
+      "name": "viipers",
       "dependencies": {
         "@ai-sdk/anthropic": "^4.0.74",
         "@ai-sdk/deepseek": "^3.0.61",

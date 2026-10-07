@@ -327,7 +327,7 @@ export class ValidTickerCache {
     }
     try {
       const res = await fetch("https://www.sec.gov/files/company_tickers.json", {
-        headers: { "User-Agent": "Mahoraga Trading Bot" },
+        headers: { "User-Agent": "Viipers Trading Bot" },
       });
       if (!res.ok) return;
       const data = (await res.json()) as Record<string, { cik_str: number; ticker: string; title: string }>;

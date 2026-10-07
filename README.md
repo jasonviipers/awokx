@@ -1,12 +1,12 @@
 ⚠️ **Warning:** This software is provided for educational and informational purposes only. Nothing in this repository constitutes financial, investment, legal, or tax advice.
 
-# MAHORAGA
+# VIIPERS
 
 An autonomous, LLM-powered trading agent that runs 24/7 on Cloudflare Workers.
 
 [![Discord](https://img.shields.io/discord/1467592472158015553?color=7289da&label=Discord&logo=discord&logoColor=white)](https://discord.gg/vMFnHe2YBh)
 
-MAHORAGA monitors social sentiment from StockTwits and Reddit, uses AI (OpenAI, Anthropic, Google, xAI, DeepSeek via AI SDK) to analyze signals, and executes trades through Alpaca. It runs as a Cloudflare Durable Object with persistent state, automatic restarts, and 24/7 crypto trading support.
+VIIPERS monitors social sentiment from StockTwits and Reddit, uses AI (OpenAI, Anthropic, Google, xAI, DeepSeek via AI SDK) to analyze signals, and executes trades through Alpaca. It runs as a Cloudflare Durable Object with persistent state, automatic restarts, and 24/7 crypto trading support.
 
 <img width="1278" height="957" alt="dashboard" src="https://github.com/user-attachments/assets/56473ab6-e2c6-45fc-9e32-cf85e69f1a2d" />
 
@@ -34,8 +34,8 @@ MAHORAGA monitors social sentiment from StockTwits and Reddit, uses AI (OpenAI, 
 ### 1. Clone and install
 
 ```bash
-git clone https://github.com/ygwyg/MAHORAGA.git
-cd mahoraga
+git clone https://github.com/jasonviipers/awokx.git
+cd awokx
 npm install
 ```
 
@@ -43,7 +43,7 @@ npm install
 
 ```bash
 # Create D1 database
-npx wrangler d1 create mahoraga-db
+npx wrangler d1 create viipers-db
 # Copy the database_id to wrangler.jsonc
 
 # Create KV namespace
@@ -51,7 +51,7 @@ npx wrangler kv namespace create CACHE
 # Copy the id to wrangler.jsonc
 
 # Run migrations
-npx wrangler d1 migrations apply mahoraga-db
+npx wrangler d1 migrations apply viipers-db
 ```
 
 ### 3. Set secrets
@@ -63,7 +63,7 @@ npx wrangler secret put ALPACA_API_SECRET
 
 # API Authentication - generate a secure random token (64+ chars recommended)
 # Example: openssl rand -base64 48
-npx wrangler secret put MAHORAGA_API_TOKEN
+npx wrangler secret put VIIPERS_API_TOKEN
 
 # LLM Provider (choose one mode)
 npx wrangler secret put LLM_PROVIDER  # "openai-raw" (default), "ai-sdk", or "cloudflare-gateway"
@@ -99,27 +99,27 @@ All API endpoints require authentication via Bearer token:
 
 ```bash
 # Set your API token as an env var for convenience
-export MAHORAGA_TOKEN="your-api-token"
+export VIIPERS_TOKEN="your-api-token"
 
 # Enable the agent
-curl -H "Authorization: Bearer $MAHORAGA_TOKEN" \
-  https://mahoraga.bernardoalmeida2004.workers.dev/agent/enable
+curl -H "Authorization: Bearer $VIIPERS_TOKEN" \
+  https://viipers.bernardoalmeida2004.workers.dev/agent/enable
 ```
 
 ### 6. Monitor
 
 ```bash
 # Check status
-curl -H "Authorization: Bearer $MAHORAGA_TOKEN" \
-  https://mahoraga.bernardoalmeida2004.workers.dev/agent/status
+curl -H "Authorization: Bearer $VIIPERS_TOKEN" \
+  https://viipers.bernardoalmeida2004.workers.dev/agent/status
 
 # View logs
-curl -H "Authorization: Bearer $MAHORAGA_TOKEN" \
-  https://mahoraga.bernardoalmeida2004.workers.dev/agent/logs
+curl -H "Authorization: Bearer $VIIPERS_TOKEN" \
+  https://viipers.bernardoalmeida2004.workers.dev/agent/logs
 
 # Emergency kill switch (uses separate KILL_SWITCH_SECRET)
 curl -H "Authorization: Bearer $KILL_SWITCH_SECRET" \
-  https://mahoraga.bernardoalmeida2004.workers.dev/agent/kill
+  https://viipers.bernardoalmeida2004.workers.dev/agent/kill
 
 # Run dashboard locally
 cd dashboard && npm install && npm run dev
@@ -135,13 +135,13 @@ npx wrangler dev
 cd dashboard && npm run dev
 
 # Terminal 3 - Enable the agent
-curl -H "Authorization: Bearer $MAHORAGA_TOKEN" \
+curl -H "Authorization: Bearer $VIIPERS_TOKEN" \
   http://localhost:8787/agent/enable
 ```
 
 ## Custom Strategies
 
-Mahoraga uses a **pluggable strategy system**. The core harness is a thin orchestrator — all customizable logic lives in strategy modules. You never need to modify core files.
+Viipers uses a **pluggable strategy system**. The core harness is a thin orchestrator — all customizable logic lives in strategy modules. You never need to modify core files.
 
 ### How it works
 
@@ -215,7 +215,7 @@ See `docs/harness.html` for the full customization guide.
 
 ### LLM Provider Configuration
 
-MAHORAGA supports multiple LLM providers via three modes:
+VIIPERS supports multiple LLM providers via three modes:
 
 | Mode | Description | Required Env Vars |
 |------|-------------|-------------------|
@@ -268,10 +268,10 @@ npx wrangler secret put ANTHROPIC_API_KEY # Your Anthropic API key
 
 ### API Authentication (Required)
 
-All `/agent/*` endpoints require Bearer token authentication using `MAHORAGA_API_TOKEN`:
+All `/agent/*` endpoints require Bearer token authentication using `VIIPERS_API_TOKEN`:
 
 ```bash
-curl -H "Authorization: Bearer $MAHORAGA_TOKEN" https://mahoraga.bernardoalmeida2004.workers.dev/agent/status
+curl -H "Authorization: Bearer $VIIPERS_TOKEN" https://viipers.bernardoalmeida2004.workers.dev/agent/status
 ```
 
 Generate a secure token: `openssl rand -base64 48`
@@ -281,7 +281,7 @@ Generate a secure token: `openssl rand -base64 48`
 The `/agent/kill` endpoint uses a separate `KILL_SWITCH_SECRET` for emergency shutdown:
 
 ```bash
-curl -H "Authorization: Bearer $KILL_SWITCH_SECRET" https://mahoraga.bernardoalmeida2004.workers.dev/agent/kill
+curl -H "Authorization: Bearer $KILL_SWITCH_SECRET" https://viipers.bernardoalmeida2004.workers.dev/agent/kill
 ```
 
 This immediately disables the agent, cancels all alarms, and clears the signal cache.
@@ -297,8 +297,8 @@ For additional security with SSO/email verification, set up Cloudflare Access:
 # 2. Run the setup script
 CLOUDFLARE_API_TOKEN=your-token \
 CLOUDFLARE_ACCOUNT_ID=your-account-id \
-MAHORAGA_WORKER_URL=https://mahoraga.your-subdomain.workers.dev \
-MAHORAGA_ALLOWED_EMAILS=you@example.com \
+VIIPERS_WORKER_URL=https://viipers.your-subdomain.workers.dev \
+VIIPERS_ALLOWED_EMAILS=you@example.com \
 npm run setup:access
 ```
 
@@ -307,7 +307,7 @@ This creates a Cloudflare Access Application with email verification or One-Time
 ## Project Structure
 
 ```
-mahoraga/
+viipers/
 ├── wrangler.jsonc              # Cloudflare Workers config
 ├── src/
 │   ├── index.ts                # Entry point & routing
@@ -315,7 +315,7 @@ mahoraga/
 │   │   ├── types.ts            # Shared types (Signal, AgentState, etc.)
 │   │   └── policy-broker.ts    # PolicyEngine-wrapped trade execution
 │   ├── durable-objects/
-│   │   └── mahoraga-harness.ts # Core orchestrator (thin — delegates to strategy)
+│   │   └── viipers-harness.ts # Core orchestrator (thin — delegates to strategy)
 │   ├── strategy/
 │   │   ├── types.ts            # Strategy interface contract
 │   │   ├── index.ts            # Active strategy selector (change this one line)
