@@ -32,8 +32,9 @@
     "@ai-sdk/google": "^4.0.90",
     "@ai-sdk/openai": "^4.0.86",
     "@ai-sdk/xai": "^5.0.17",
-    "@modelcontextprotocol/client": "2.2.0",
-    "@modelcontextprotocol/sdk": "~1.32.1",
+    "@modelcontextprotocol/client": "2.0.0",
+    "@modelcontextprotocol/sdk": "1.30.0",
+    "@modelcontextprotocol/server": "2.0.0",
     "agents": "^0.26.0",
     "ai": "^7.0.130",
     "zod": "^4.6.5"

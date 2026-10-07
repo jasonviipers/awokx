@@ -1,5 +1,4 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { McpAgent } from "agents/mcp";
+import { type CallToolResult, McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import type { Env } from "../env.d";
 import { ErrorCode } from "../lib/errors";
@@ -39,11 +38,40 @@ import { createTrade } from "../storage/d1/queries/trades";
 import type { OptionsOrderPreview } from "./types";
 import { failure, success } from "./types";
 
-export class ViipersMcpAgent extends McpAgent<Env> {
-  server = new McpServer({
-    name: "viipers",
-    version: "0.1.0",
-  });
+/**
+ * Keeps the `server.tool(name, description, shape, handler)` registration style used by
+ * every tool below, mapped onto the MCP SDK v2 `registerTool` API.
+ */
+class ToolRegistrar {
+  constructor(private readonly mcp: McpServer) {}
+
+  tool<Shape extends Record<string, z.ZodType>>(
+    name: string,
+    description: string,
+    shape: Shape,
+    handler: (args: z.infer<z.ZodObject<Shape>>) => Promise<CallToolResult>
+  ): void {
+    this.mcp.registerTool(name, { description, inputSchema: z.object(shape) }, (args) =>
+      handler(args as z.infer<z.ZodObject<Shape>>)
+    );
+  }
+}
+
+/**
+ * Builds a fresh MCP server for one request (stateless: createMcpHandler calls the
+ * factory per HTTP request). Replaces the deprecated, Durable Object-backed McpAgent.
+ */
+export async function createViipersMcpServer(env: Env): Promise<McpServer> {
+  const mcp = new McpServer({ name: "viipers", version: "0.2.0" });
+  await new ViipersMcpTools(env, new ToolRegistrar(mcp)).init();
+  return mcp;
+}
+
+class ViipersMcpTools {
+  constructor(
+    private readonly env: Env,
+    private readonly server: ToolRegistrar
+  ) {}
 
   private requestId: string = "";
   private policyConfig: PolicyConfig | null = null;

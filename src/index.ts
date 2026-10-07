@@ -1,13 +1,13 @@
+import { createMcpHandler } from "agents/mcp/server";
 import { consumeRateLimit } from "./durable-objects/session";
 import { getHarnessStub } from "./durable-objects/viipers-harness";
 import type { Env } from "./env.d";
 import { handleCronEvent } from "./jobs/cron";
 import { constantTimeCompare, parseBoolean } from "./lib/utils";
-import { ViipersMcpAgent } from "./mcp/agent";
+import { createViipersMcpServer } from "./mcp/agent";
 
 export { SessionDO } from "./durable-objects/session";
 export { ViipersHarness } from "./durable-objects/viipers-harness";
-export { ViipersMcpAgent };
 
 function isAuthorized(request: Request, env: Env): boolean {
   const token = env.VIIPERS_API_TOKEN;
@@ -120,7 +120,9 @@ export default {
       const rateCheck = await consumeRateLimit(env, "admin-api");
       if (!rateCheck.allowed)
         return Response.json({ error: "Rate limit exceeded", resetAt: rateCheck.resetAt }, { status: 429 });
-      return ViipersMcpAgent.mount("/mcp", { binding: "MCP_AGENT" }).fetch(request, env, ctx);
+      // Stateless MCP (SDK v2): a fresh server per request, so no Durable Object or session
+      // state. The factory closes over this request's env for D1/KV/secrets access.
+      return createMcpHandler(() => createViipersMcpServer(env), { route: "/mcp" })(request, env, ctx);
     }
 
     // Read-only spectator API (/api/public/*). Opt-in, unauthenticated, GET-only.

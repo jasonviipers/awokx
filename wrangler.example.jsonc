@@ -84,10 +84,6 @@
 				"class_name": "SessionDO"
 			},
 			{
-				"name": "MCP_AGENT",
-				"class_name": "ViipersMcpAgent"
-			},
-			{
 				"name": "VIIPERS_HARNESS",
 				"class_name": "ViipersHarness"
 			}
@@ -101,6 +97,10 @@
 				"ViipersMcpAgent",
 				"ViipersHarness"
 			]
+		},
+		{
+			"tag": "v2",
+			"deleted_classes": ["ViipersMcpAgent"]
 		}
 	],
 	"triggers": {
