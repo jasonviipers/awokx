@@ -86,7 +86,13 @@ export function getDefaultPolicyConfig(env: Env): PolicyConfig {
 }
 
 export function validateOptionsPolicyConfig(config: unknown): OptionsPolicyConfig {
+  if (!config || typeof config !== "object" || Array.isArray(config))
+    throw new Error("Options policy must be an object");
   const c = config as Record<string, unknown>;
+  for (const [key, value] of Object.entries(c)) {
+    if (typeof value === "number" && !Number.isFinite(value)) throw new Error(`options.${key} must be finite`);
+  }
+  if (typeof c.no_averaging_down !== "boolean") throw new Error("options.no_averaging_down must be a boolean");
 
   if (typeof c.options_enabled !== "boolean") {
     throw new Error("options.options_enabled must be a boolean");
@@ -154,7 +160,21 @@ export function validateOptionsPolicyConfig(config: unknown): OptionsPolicyConfi
 }
 
 export function validatePolicyConfig(config: unknown): PolicyConfig {
+  if (!config || typeof config !== "object" || Array.isArray(config)) throw new Error("Policy must be an object");
   const c = config as Record<string, unknown>;
+  for (const [key, value] of Object.entries(c)) {
+    if (typeof value === "number" && !Number.isFinite(value)) throw new Error(`${key} must be finite`);
+  }
+  for (const key of ["trading_hours_only", "extended_hours_allowed", "allow_short_selling", "use_cash_only"]) {
+    if (typeof c[key] !== "boolean") throw new Error(`${key} must be a boolean`);
+  }
+  if (
+    !Array.isArray(c.deny_symbols) ||
+    !c.deny_symbols.every((symbol) => typeof symbol === "string") ||
+    (c.allowed_symbols !== null &&
+      (!Array.isArray(c.allowed_symbols) || !c.allowed_symbols.every((symbol) => typeof symbol === "string")))
+  )
+    throw new Error("Symbol filters must be arrays of strings (allowed_symbols may be null)");
 
   if (
     typeof c.max_position_pct_equity !== "number" ||
@@ -175,6 +195,17 @@ export function validatePolicyConfig(config: unknown): PolicyConfig {
   if (!Array.isArray(c.allowed_order_types) || c.allowed_order_types.length === 0) {
     throw new Error("allowed_order_types must be a non-empty array");
   }
+  if (!c.allowed_order_types.every((type) => ["market", "limit", "stop", "stop_limit"].includes(type as string)))
+    throw new Error("Invalid allowed_order_types");
+  if (!Number.isInteger(c.max_open_positions) || !Number.isInteger(c.approval_token_ttl_seconds))
+    throw new Error("Position count and approval TTL must be integers");
+  if (
+    typeof c.min_price !== "number" ||
+    c.min_price <= 0 ||
+    typeof c.min_avg_volume !== "number" ||
+    c.min_avg_volume < 0
+  )
+    throw new Error("Invalid minimum price or volume");
 
   if (typeof c.max_daily_loss_pct !== "number" || c.max_daily_loss_pct <= 0 || c.max_daily_loss_pct > 1) {
     throw new Error("max_daily_loss_pct must be between 0 and 1");

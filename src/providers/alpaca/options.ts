@@ -129,12 +129,6 @@ export function getDTE(expirationDate: string): number {
 /**
  * Get expiration dates within a DTE range
  */
-export function filterExpirationsByDTE(expirations: string[], minDTE: number, maxDTE: number): string[] {
-  return expirations.filter((exp) => {
-    const dte = getDTE(exp);
-    return dte >= minDTE && dte <= maxDTE;
-  });
-}
 
 // ============================================================================
 // Alpaca Options Provider

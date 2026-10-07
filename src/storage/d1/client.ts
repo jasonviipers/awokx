@@ -33,19 +33,6 @@ export class D1Client {
   }
 }
 
-export interface ToolLogEntry {
-  id: string;
-  request_id: string;
-  tool_name: string;
-  input_hash: string;
-  input_json: string;
-  output_json: string | null;
-  error_json: string | null;
-  latency_ms: number | null;
-  provider_calls: number;
-  created_at: string;
-}
-
 export interface RiskStateRow {
   id: number;
   kill_switch_active: number;
@@ -67,23 +54,6 @@ export interface OrderApprovalRow {
   expires_at: string;
   used_at: string | null;
   created_at: string;
-}
-
-export interface TradeRow {
-  id: string;
-  approval_id: string | null;
-  alpaca_order_id: string;
-  symbol: string;
-  side: string;
-  qty: number;
-  order_type: string;
-  limit_price: number | null;
-  stop_price: number | null;
-  status: string;
-  filled_qty: number | null;
-  filled_avg_price: number | null;
-  created_at: string;
-  updated_at: string;
 }
 
 export interface PolicyConfigRow {

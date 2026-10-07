@@ -35,6 +35,8 @@ describe("signed approval integrity", () => {
     };
     const secret = "test-signing-secret";
     const generated = await generateApprovalToken({
+      scope: "orders",
+      broker: "alpaca",
       db,
       secret,
       preview,
@@ -47,7 +49,9 @@ describe("signed approval integrity", () => {
   it("persists and returns the same approval ID", async () => {
     const { db, secret, generated, row } = await fixture();
     expect(row.id).toBe(generated.approval_id);
-    expect(await validateApprovalToken({ db, secret, token: generated.token })).toMatchObject({
+    expect(
+      await validateApprovalToken({ scope: "orders", broker: "alpaca", db, secret, token: generated.token })
+    ).toMatchObject({
       valid: true,
       approval_id: generated.approval_id,
     });
@@ -56,17 +60,31 @@ describe("signed approval integrity", () => {
   it("rejects an order modified after approval", async () => {
     const { db, secret, generated, row } = await fixture();
     row.order_params_json = JSON.stringify({ ...JSON.parse(row.order_params_json), qty: 100 });
-    expect(await validateApprovalToken({ db, secret, token: generated.token })).toMatchObject({
+    expect(
+      await validateApprovalToken({ scope: "orders", broker: "alpaca", db, secret, token: generated.token })
+    ).toMatchObject({
       valid: false,
       reason: "Approved order has been modified",
     });
+  });
+
+  it("rejects approval reuse through another endpoint or broker", async () => {
+    const { db, secret, generated } = await fixture();
+    expect(
+      await validateApprovalToken({ scope: "options", broker: "alpaca", db, secret, token: generated.token })
+    ).toMatchObject({ valid: false });
+    expect(
+      await validateApprovalToken({ scope: "orders", broker: "okx", db, secret, token: generated.token })
+    ).toMatchObject({ valid: false });
   });
 
   it("rejects at the exact expiry boundary", async () => {
     vi.useFakeTimers();
     const { db, secret, generated } = await fixture();
     vi.setSystemTime(new Date(generated.expires_at));
-    expect(await validateApprovalToken({ db, secret, token: generated.token })).toMatchObject({
+    expect(
+      await validateApprovalToken({ scope: "orders", broker: "alpaca", db, secret, token: generated.token })
+    ).toMatchObject({
       valid: false,
       reason: "Approval token expired",
     });

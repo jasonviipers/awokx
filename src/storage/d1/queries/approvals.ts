@@ -51,7 +51,3 @@ export async function cleanupExpiredApprovals(db: D1Client): Promise<number> {
   const result = await db.run(`DELETE FROM order_approvals WHERE expires_at < ? AND used_at IS NULL`, [nowISO()]);
   return result.meta.changes ?? 0;
 }
-
-export async function getRecentApprovals(db: D1Client, limit: number = 20): Promise<OrderApprovalRow[]> {
-  return db.execute<OrderApprovalRow>(`SELECT * FROM order_approvals ORDER BY created_at DESC LIMIT ?`, [limit]);
-}

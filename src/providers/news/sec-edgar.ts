@@ -1,5 +1,6 @@
 import { generateId } from "../../lib/utils";
 import type { NewsItem, NewsProvider, RawEvent } from "../types";
+import { parseSECAtomFeed } from "./sec-atom";
 
 const SEC_BASE_URL = "https://www.sec.gov";
 
@@ -45,7 +46,7 @@ export class SECEdgarProvider implements NewsProvider {
       }
 
       const text = await response.text();
-      const entries = this.parseAtomFeed(text);
+      const entries = parseSECAtomFeed(text);
 
       for (const entry of entries.slice(0, 20)) {
         events.push({
@@ -116,50 +117,6 @@ export class SECEdgarProvider implements NewsProvider {
 
   async search(_query: string, _limit: number = 20): Promise<NewsItem[]> {
     return [];
-  }
-
-  private parseAtomFeed(xml: string): Array<{
-    id: string;
-    title: string;
-    updated: string;
-    form: string;
-    company: string;
-  }> {
-    const entries: Array<{
-      id: string;
-      title: string;
-      updated: string;
-      form: string;
-      company: string;
-    }> = [];
-
-    const entryRegex = /<entry>([\s\S]*?)<\/entry>/g;
-    let match;
-
-    while ((match = entryRegex.exec(xml)) !== null) {
-      const entryXml = match[1];
-      if (!entryXml) continue;
-
-      const id = this.extractTag(entryXml, "id") || generateId();
-      const title = this.extractTag(entryXml, "title") || "";
-      const updated = this.extractTag(entryXml, "updated") || new Date().toISOString();
-
-      const formMatch = title.match(/\((\d+-\w+|\w+)\)/);
-      const form = formMatch ? (formMatch[1] ?? "") : "";
-
-      const companyMatch = title.match(/^([^(]+)/);
-      const company = companyMatch ? (companyMatch[1]?.trim() ?? "") : "";
-
-      entries.push({ id, title, updated, form, company });
-    }
-
-    return entries;
-  }
-
-  private extractTag(xml: string, tag: string): string | null {
-    const regex = new RegExp(`<${tag}[^>]*>([^<]*)</${tag}>`);
-    const match = xml.match(regex);
-    return match ? (match[1] ?? null) : null;
   }
 
   private async getCik(symbol: string): Promise<string | null> {

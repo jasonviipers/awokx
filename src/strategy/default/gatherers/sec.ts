@@ -4,57 +4,12 @@
 
 import type { Signal } from "../../../core/types";
 import { createAlpacaProviders } from "../../../providers/alpaca";
+import { parseSECAtomFeed } from "../../../providers/news/sec-atom";
 import type { Gatherer, StrategyContext } from "../../types";
 import { SOURCE_CONFIG } from "../config";
 import { tickerCache } from "../helpers/ticker";
 
 // ── XML / feed helpers ───────────────────────────────────────────────────────
-
-function extractXmlTag(xml: string, tag: string): string | null {
-  const regex = new RegExp(`<${tag}[^>]*>([^<]*)</${tag}>`);
-  const match = xml.match(regex);
-  return match ? (match[1] ?? null) : null;
-}
-
-function parseSECAtomFeed(xml: string): Array<{
-  id: string;
-  title: string;
-  updated: string;
-  form: string;
-  company: string;
-}> {
-  const entries: Array<{
-    id: string;
-    title: string;
-    updated: string;
-    form: string;
-    company: string;
-  }> = [];
-
-  const entryRegex = /<entry>([\s\S]*?)<\/entry>/g;
-  let match: RegExpExecArray | null;
-
-  while ((match = entryRegex.exec(xml)) !== null) {
-    const entryXml = match[1];
-    if (!entryXml) continue;
-
-    const id = extractXmlTag(entryXml, "id") || `sec_${Date.now()}_${Math.random()}`;
-    const title = extractXmlTag(entryXml, "title") || "";
-    const updated = extractXmlTag(entryXml, "updated") || new Date().toISOString();
-
-    const formMatch = title.match(/\((\d+-\w+|\w+)\)/);
-    const form = formMatch ? (formMatch[1] ?? "") : "";
-
-    const companyMatch = title.match(/^([^(]+)/);
-    const company = companyMatch ? (companyMatch[1]?.trim() ?? "") : "";
-
-    if (form && company) {
-      entries.push({ id, title, updated, form, company });
-    }
-  }
-
-  return entries;
-}
 
 function calculateSECFreshness(updatedDate: string): number {
   const ageMs = Date.now() - new Date(updatedDate).getTime();
@@ -132,7 +87,7 @@ async function gatherSECFilings(ctx: StrategyContext): Promise<Signal[]> {
     }
 
     const text = await response.text();
-    const entries = parseSECAtomFeed(text);
+    const entries = parseSECAtomFeed(text).filter((entry) => entry.form && entry.company);
 
     const alpaca = createAlpacaProviders(ctx.env);
 

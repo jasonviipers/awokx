@@ -503,8 +503,11 @@ export class MahoragaMcpAgent extends McpAgent<Env> {
 
           const orderParams = validation.order_params!;
           const [clock, account, positions, currentRiskState, storedPolicy] = await Promise.all([
-            broker.trading.getClock(), broker.trading.getAccount(), broker.trading.getPositions(),
-            getRiskState(db), getPolicyConfig(db),
+            broker.trading.getClock(),
+            broker.trading.getAccount(),
+            broker.trading.getPositions(),
+            getRiskState(db),
+            getPolicyConfig(db),
           ]);
           const isCrypto = orderParams.asset_class === "crypto";
           if (!isCrypto && !clock.is_open && orderParams.time_in_force === "day") {
@@ -526,11 +529,32 @@ export class MahoragaMcpAgent extends McpAgent<Env> {
           }
           const currentPolicy = new PolicyEngine(storedPolicy ?? getDefaultPolicyConfig(this.env));
           const policyResult = currentPolicy.evaluate({
-            order: { ...orderParams, estimated_price: estimatedPrice, estimated_cost: orderParams.notional ?? (orderParams.qty ?? 0) * (estimatedPrice ?? 0) },
-            account, positions, clock, riskState: currentRiskState,
+            order: {
+              ...orderParams,
+              estimated_price: estimatedPrice,
+              estimated_cost: orderParams.notional ?? (orderParams.qty ?? 0) * (estimatedPrice ?? 0),
+            },
+            account,
+            positions,
+            clock,
+            riskState: currentRiskState,
           });
           if (!policyResult.allowed) {
-            return { content: [{ type: "text" as const, text: JSON.stringify(failure({ code: ErrorCode.POLICY_VIOLATION, message: "Order no longer passes current policy", details: policyResult.violations })) }], isError: true };
+            return {
+              content: [
+                {
+                  type: "text" as const,
+                  text: JSON.stringify(
+                    failure({
+                      code: ErrorCode.POLICY_VIOLATION,
+                      message: "Order no longer passes current policy",
+                      details: policyResult.violations,
+                    })
+                  ),
+                },
+              ],
+              isError: true,
+            };
           }
 
           // Claim the token before placing the order so concurrent submits can't double-execute
@@ -2055,6 +2079,8 @@ export class MahoragaMcpAgent extends McpAgent<Env> {
           }
 
           const validation = await validateApprovalToken({
+            scope: "options",
+            broker: "alpaca",
             token: approval_token,
             secret: this.env.KILL_SWITCH_SECRET,
             db,
@@ -2076,7 +2102,14 @@ export class MahoragaMcpAgent extends McpAgent<Env> {
           }
 
           const orderParams = validation.order_params!;
-          const clock = await alpaca.trading.getClock();
+          const [clock, account, positions, currentRiskState, storedPolicy, snapshot] = await Promise.all([
+            alpaca.trading.getClock(),
+            alpaca.trading.getAccount(),
+            alpaca.trading.getPositions(),
+            getRiskState(db),
+            getPolicyConfig(db),
+            this.options!.getSnapshot(orderParams.symbol),
+          ]);
           const isCrypto = orderParams.asset_class === "crypto";
           if (!isCrypto && !clock.is_open && orderParams.time_in_force === "day") {
             return {
@@ -2084,6 +2117,61 @@ export class MahoragaMcpAgent extends McpAgent<Env> {
                 {
                   type: "text" as const,
                   text: JSON.stringify(failure({ code: ErrorCode.MARKET_CLOSED, message: "Market closed" }), null, 2),
+                },
+              ],
+              isError: true,
+            };
+          }
+
+          const contract = this.parseOptionsSymbol(orderParams.symbol);
+          if (
+            !contract ||
+            !orderParams.qty ||
+            (orderParams.order_type !== "market" && orderParams.order_type !== "limit") ||
+            (orderParams.time_in_force !== "day" && orderParams.time_in_force !== "gtc")
+          ) {
+            throw new Error("Approved options order has invalid contract or order parameters");
+          }
+          const premium =
+            orderParams.order_type === "limit"
+              ? orderParams.limit_price
+              : orderParams.side === "buy"
+                ? snapshot.latest_quote.ask_price
+                : snapshot.latest_quote.bid_price;
+          const policyResult = new PolicyEngine(storedPolicy ?? getDefaultPolicyConfig(this.env)).evaluateOptionsOrder({
+            order: {
+              contract_symbol: orderParams.symbol,
+              underlying: contract.underlying,
+              side: orderParams.side,
+              qty: orderParams.qty,
+              order_type: orderParams.order_type,
+              limit_price: orderParams.limit_price,
+              time_in_force: orderParams.time_in_force,
+              expiration: contract.expiration,
+              strike: contract.strike,
+              option_type: contract.type,
+              dte: getDTE(contract.expiration),
+              delta: snapshot.greeks?.delta,
+              estimated_premium: premium,
+              estimated_cost: orderParams.qty * (premium ?? 0) * 100,
+            },
+            account,
+            positions,
+            clock,
+            riskState: currentRiskState,
+          });
+          if (!policyResult.allowed) {
+            return {
+              content: [
+                {
+                  type: "text" as const,
+                  text: JSON.stringify(
+                    failure({
+                      code: ErrorCode.POLICY_VIOLATION,
+                      message: "Options order no longer passes current policy",
+                      details: policyResult.violations,
+                    })
+                  ),
                 },
               ],
               isError: true,
