@@ -137,3 +137,39 @@ describe("OkxTradingProvider", () => {
     expect(cancel[3]).toEqual({ instId: "ETH-USDT", ordId: "42" });
   });
 });
+
+describe("OkxTradingProvider with a USDC quote (EEA/US accounts without USDT)", () => {
+  const usdcBalance = {
+    totalEq: "100000",
+    uTime: "1700000000000",
+    details: [
+      { ccy: "USDC", eq: "5000", availBal: "5000", eqUsd: "4999" },
+      { ccy: "USD", eq: "5000", availBal: "5000", eqUsd: "5000" },
+      { ccy: "BTC", eq: "1", availBal: "1", eqUsd: "84000" },
+    ],
+  };
+
+  it("counts USDC as spendable cash and trades BTC-USDC for BTC/USD", async () => {
+    const { client, privateRequest } = createMockClient({
+      "/api/v5/account/balance": [usdcBalance],
+      "/api/v5/public/instruments": [{ ...BTC_INSTRUMENT, instId: "BTC-USDC", quoteCcy: "USDC" }],
+      "/api/v5/trade/order": [{ ordId: "1", sCode: "0" }],
+    });
+    const provider = new OkxTradingProvider(client, "USDC");
+
+    const account = await provider.getAccount();
+    expect(account.cash).toBe(5000);
+    expect(account.currency).toBe("USDC");
+
+    const order = await provider.createOrder({
+      symbol: "BTC/USD",
+      notional: 100,
+      side: "buy",
+      type: "market",
+      time_in_force: "gtc",
+    });
+    const orderCall = privateRequest.mock.calls.find((call) => call[1] === "/api/v5/trade/order")!;
+    expect(orderCall[3]).toMatchObject({ instId: "BTC-USDC", tgtCcy: "quote_ccy" });
+    expect(order.symbol).toBe("BTC/USD");
+  });
+});

@@ -334,6 +334,36 @@
           <td><code>true</code> for paper trading (recommended)</td>
         </tr>
         <tr>
+          <td><code>BROKER_PROVIDER</code></td>
+          <td>No</td>
+          <td>Default broker: <code>alpaca</code> (default) or <code>okx</code>. Can be switched later in the dashboard under <strong>[CONFIG] → Broker</strong></td>
+        </tr>
+        <tr>
+          <td><code>OKX_API_KEY</code>, <code>OKX_API_SECRET</code>, <code>OKX_API_PASSPHRASE</code></td>
+          <td>For OKX</td>
+          <td>All three come from the same OKX API key. Grant Read + Trade only (never Withdraw) and leave the IP whitelist empty (Workers have no fixed IP)</td>
+        </tr>
+        <tr>
+          <td><code>OKX_SIMULATED</code></td>
+          <td>No</td>
+          <td><code>true</code> = OKX demo trading. Requires a key created inside Demo Trading; a live key returns "API key doesn't exist"</td>
+        </tr>
+        <tr>
+          <td><code>OKX_QUOTE_CCY</code></td>
+          <td>No</td>
+          <td>Stablecoin the bot trades against: <code>USDT</code> (default) or <code>USDC</code> for EU/US accounts that hold no USDT</td>
+        </tr>
+        <tr>
+          <td><code>OKX_API_BASE_URL</code></td>
+          <td>No</td>
+          <td>Must match your account's region: <code>https://openapi.okx.com</code> (global, default), <code>https://eea.okx.com</code> (my.okx.com), <code>https://us.okx.com</code> (app.okx.com)</td>
+        </tr>
+        <tr>
+          <td><code>PUBLIC_DASHBOARD</code></td>
+          <td>No</td>
+          <td><code>true</code> lets anyone view P&amp;L, trades and activity read-only. Settings and controls still require <code>VIIPERS_API_TOKEN</code></td>
+        </tr>
+        <tr>
           <td><code>OPENAI_API_KEY</code></td>
           <td>Depends</td>
           <td>Required if using <code>openai-raw</code> or <code>ai-sdk</code> with OpenAI</td>
@@ -351,7 +381,43 @@
         <tr>
           <td><code>TWITTER_BEARER_TOKEN</code></td>
           <td>No</td>
-          <td>Enable Twitter sentiment confirmation</td>
+          <td>X API app-only Bearer Token. Enables X (Twitter) sentiment confirmation</td>
+        </tr>
+      </table>
+
+      <h2>X (Twitter) API</h2>
+      <p>
+        X is used for <strong>confirmation only</strong>: it raises or lowers confidence on signals from other sources and
+        never creates trades on its own. Viipers calls <code>GET https://api.x.com/2/tweets/search/recent</code> with an
+        app-only Bearer Token (create one at <a href="https://developer.x.com">developer.x.com</a>), searching cashtags
+        like <code>$NVDA</code> over the last 7 days.
+      </p>
+      <ul>
+        <li><strong>Budget:</strong> at most 200 searches per day, tracked in agent state.</li>
+        <li><strong>Rate limits:</strong> on HTTP 429 the agent pauses X searches until the <code>x-rate-limit-reset</code> time (15-minute windows).</li>
+        <li><strong>Limits:</strong> queries over 512 characters are skipped; 10–100 results per request.</li>
+      </ul>
+      <p>Resources for AI tools working with the X API:</p>
+      <table>
+        <tr>
+          <th>Resource</th>
+          <th>Use</th>
+        </tr>
+        <tr>
+          <td><a href="https://docs.x.com/llms.txt">llms.txt</a> / <a href="https://docs.x.com/llms-full.txt">llms-full.txt</a></td>
+          <td>Documentation index / full docs in one file for LLM context</td>
+        </tr>
+        <tr>
+          <td><a href="https://docs.x.com/skill.md">skill.md</a></td>
+          <td>Capability summary: actions, parameters and constraints</td>
+        </tr>
+        <tr>
+          <td><a href="https://docs.x.com/mcp">Docs MCP</a> / <a href="https://docs.x.com/tools/mcp">X MCP</a></td>
+          <td>MCP servers to search the docs, or call 200+ X API endpoints as tools</td>
+        </tr>
+        <tr>
+          <td><a href="https://api.x.com/2/openapi.json">OpenAPI spec</a></td>
+          <td>Machine-readable API definition for code generation</td>
         </tr>
       </table>
 

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { API_BASE, authFetch } from '../api'
-import type { Config, ModelInfo } from '../types'
+import type { BrokersInfo, Config, ModelInfo } from '../types'
 import { Panel } from './Panel'
 
 const KNOWN_LLM_PROVIDERS = ['openai-raw', 'ai-sdk', 'cloudflare-gateway']
@@ -62,9 +62,26 @@ export function SettingsModal({ config, onSave, onClose }: SettingsModalProps) {
     return () => { cancelled = true }
   }, [])
 
+  // Which brokers have credentials configured server-side (names only, never secret values).
+  const [brokers, setBrokers] = useState<BrokersInfo | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    authFetch(`${API_BASE}/brokers`)
+      .then(res => res.json())
+      .then(data => {
+        if (!cancelled && data.ok && Array.isArray(data.data?.brokers)) setBrokers(data.data)
+      })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [])
+
   const handleChange = <K extends keyof Config>(key: K, value: Config[K]) => {
     setLocalConfig(prev => ({ ...prev, [key]: value }))
   }
+
+  const savedBroker = brokers?.active
+  const selectedBroker = localConfig.broker_provider ?? savedBroker
+  const selectedBrokerInfo = brokers?.brokers.find(b => b.id === selectedBroker)
 
   const handleProviderChange = (llmProvider: Config['llm_provider']) => {
     setLocalConfig(prev => ({
@@ -157,6 +174,38 @@ export function SettingsModal({ config, onSave, onClose }: SettingsModalProps) {
             <p className="text-[9px] text-hud-text-dim mt-1">
               Your VIIPERS_API_TOKEN from Cloudflare secrets. Required for all API access.
             </p>
+          </div>
+
+          {/* Broker */}
+          <div className="pb-4 border-b border-hud-line max-w-[720px]">
+            <h3 className="hud-label mb-3 text-hud-primary">Broker</h3>
+            <select
+              className="hud-input w-full"
+              value={selectedBroker ?? ''}
+              disabled={!brokers}
+              onChange={e => handleChange('broker_provider', e.target.value as Config['broker_provider'])}
+            >
+              {!brokers && <option value="">Loading brokers…</option>}
+              {brokers?.brokers.map(b => (
+                <option key={b.id} value={b.id} disabled={!b.configured}>
+                  {b.label} — {b.tradingMode === 'live' ? 'LIVE money' : 'paper / demo'}
+                  {b.configured ? '' : ` (missing ${b.missingSecrets.join(', ')})`}
+                </option>
+              ))}
+            </select>
+            <p className="text-[9px] text-hud-text-dim mt-1">
+              Brokers without credentials can't be selected. Add them as secrets (wrangler secret put …) and reload.
+              {brokers && brokers.active === brokers.envDefault && !localConfig.broker_provider &&
+                ` Currently using the server default (${brokers.envDefault.toUpperCase()}).`}
+            </p>
+            {savedBroker && selectedBroker && selectedBroker !== savedBroker && (
+              <p role="alert" className="text-[10px] text-hud-warning mt-2">
+                Switching from {savedBroker.toUpperCase()} to {selectedBroker.toUpperCase()}: open positions on{' '}
+                {savedBroker.toUpperCase()} stay open but will no longer be managed by the agent. Close them first if
+                needed.
+                {selectedBrokerInfo?.tradingMode === 'live' && ' This broker trades with REAL money.'}
+              </p>
+            )}
           </div>
 
           {/* Settings flow into balanced columns so the modal uses the screen width */}

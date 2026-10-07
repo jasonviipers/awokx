@@ -26,12 +26,20 @@ import { getDefaultPolicyConfig } from "../policy/config";
 import { PolicyEngine } from "../policy/engine";
 import { createAlpacaProviders } from "../providers/alpaca";
 import { getDTE } from "../providers/alpaca/options";
-import { createBrokerProviders, resolveBrokerProvider } from "../providers/broker";
+import {
+  brokerTradingMode,
+  createBrokerProviders,
+  describeBrokers,
+  missingBrokerSecrets,
+  resolveBrokerProvider,
+  storeBrokerOverride,
+} from "../providers/broker";
 import { createLLMProvider } from "../providers/llm/factory";
 import { DEFAULT_ANALYST_MODEL, DEFAULT_RESEARCH_MODEL, estimateCostUsd, MODEL_CATALOG } from "../providers/llm/models";
 import type { Account, LLMProvider, MarketClock, Position } from "../providers/types";
 import {
   PUBLIC_HISTORY_PERIODS,
+  redactSecrets,
   toPublicAccount,
   toPublicConfig,
   toPublicLogEntry,
@@ -61,6 +69,12 @@ import type { StrategyContext } from "../strategy/types";
 // ============================================================================
 
 type IntradayReporting = "market_hours" | "extended_hours" | "continuous";
+
+/** Admin-facing broker error: provider message without stack, credentials, or URLs. */
+function brokerErrorMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return redactSecrets(message).slice(0, 300);
+}
 
 const PUBLIC_STATUS_TTL_MS = 10_000;
 const PUBLIC_TRADES_TTL_MS = 30_000;
@@ -105,7 +119,7 @@ export class ViipersHarness extends DurableObject<Env> {
 
   private initializeLLM() {
     const provider = this.state.config.llm_provider || this.env.LLM_PROVIDER || "openai-raw";
-    const model = this.state.config.llm_model || this.env.LLM_MODEL || "gpt-4o-mini";
+    const model = this.state.config.llm_model || this.env.LLM_MODEL || DEFAULT_RESEARCH_MODEL;
 
     const effectiveEnv: Env = {
       ...this.env,
@@ -162,7 +176,7 @@ export class ViipersHarness extends DurableObject<Env> {
   private async buildStrategyContext(): Promise<StrategyContext> {
     const self = this;
     const db = createD1Client(this.env.DB);
-    const providers = createBrokerProviders(this.env);
+    const providers = this.brokerProviders();
     const policyConfig = (await getPolicyConfig(db)) ?? getDefaultPolicyConfig(this.env);
     policyConfig.max_open_positions = Math.min(policyConfig.max_open_positions, this.state.config.max_positions);
     policyConfig.max_notional_per_trade = Math.min(
@@ -564,7 +578,7 @@ export class ViipersHarness extends DurableObject<Env> {
     if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) return cached;
 
     try {
-      const providers = createBrokerProviders(this.env);
+      const providers = this.brokerProviders();
       const crypto = isCryptoSymbol(symbol, this.state.config.crypto_symbols || []);
       let price = 0;
       if (crypto) {
@@ -1151,6 +1165,7 @@ export class ViipersHarness extends DurableObject<Env> {
       "signals",
       "history",
       "trades",
+      "brokers",
       "models",
       "setup/status",
     ];
@@ -1174,7 +1189,14 @@ export class ViipersHarness extends DurableObject<Env> {
         case "status":
           return this.handleStatus();
         case "trades":
-          return this.jsonResponse({ ok: true, data: await this.collectRecentTrades() });
+          try {
+            return this.jsonResponse({ ok: true, data: await this.collectRecentTrades() });
+          } catch (error) {
+            // Broker unreachable is reported as data (status shows the banner), not an HTTP 500.
+            return this.jsonResponse({ ok: false, error: brokerErrorMessage(error) });
+          }
+        case "brokers":
+          return this.jsonResponse({ ok: true, data: describeBrokers(this.env, this.state.config.broker_provider) });
         case "models":
           return this.jsonResponse({
             ok: true,
@@ -1184,7 +1206,7 @@ export class ViipersHarness extends DurableObject<Env> {
             },
           });
         case "setup/status":
-          return this.jsonResponse({ ok: true, data: getSetupStatus(this.env) });
+          return this.jsonResponse({ ok: true, data: getSetupStatus(this.env, this.state.config.broker_provider) });
         case "config":
           if (request.method === "POST") return this.handleUpdateConfig(request);
           return this.jsonResponse({ ok: true, data: this.state.config });
@@ -1226,22 +1248,25 @@ export class ViipersHarness extends DurableObject<Env> {
     return this.jsonResponse({ ok: true, data: await this.collectStatus() });
   }
 
-  /** "paper" when orders go to a simulated account (Alpaca paper / OKX demo), else "live". */
+  /** The broker chosen in the dashboard (config), else the BROKER_PROVIDER env default. */
+  private brokerProviders() {
+    return createBrokerProviders(this.env, this.state.config.broker_provider);
+  }
+
   private getTradingMode(): { broker: string; tradingMode: "paper" | "live" } {
-    const broker = resolveBrokerProvider(this.env);
-    const paper =
-      broker === "okx" ? parseBoolean(this.env.OKX_SIMULATED, false) : parseBoolean(this.env.ALPACA_PAPER, true);
-    return { broker, tradingMode: paper ? "paper" : "live" };
+    const broker = resolveBrokerProvider(this.env, this.state.config.broker_provider);
+    return { broker, tradingMode: brokerTradingMode(this.env, broker) };
   }
 
   private async collectStatus() {
-    const providers = createBrokerProviders(this.env);
-
     let account: Account | null = null;
     let positions: Position[] = [];
     let clock: MarketClock | null = null;
+    // Shown to the admin so a bad key/region is visible instead of a silently empty account.
+    let brokerError: string | null = null;
 
     try {
+      const providers = this.brokerProviders();
       [account, positions, clock] = await Promise.all([
         providers.trading.getAccount(),
         providers.trading.getPositions(),
@@ -1255,14 +1280,15 @@ export class ViipersHarness extends DurableObject<Env> {
           entry.peak_price = Math.max(entry.peak_price, pos.current_price);
         }
       }
-    } catch (_e) {
-      // Ignore - will return null
+    } catch (error) {
+      brokerError = brokerErrorMessage(error);
     }
 
     return {
       enabled: this.state.enabled,
       strategy: activeStrategy.name,
       ...this.getTradingMode(),
+      brokerError,
       account,
       positions,
       clock,
@@ -1283,13 +1309,13 @@ export class ViipersHarness extends DurableObject<Env> {
   }
 
   private async collectRecentTrades() {
-    const providers = createBrokerProviders(this.env);
+    const providers = this.brokerProviders();
     const orders = await providers.trading.listOrders({ status: "all", limit: 50 });
     return orders.map(toPublicOrder);
   }
 
   private async collectHistory(period: string, timeframe: string, intradayReporting: IntradayReporting) {
-    const providers = createBrokerProviders(this.env);
+    const providers = this.brokerProviders();
     const history = await providers.trading.getPortfolioHistory({
       period,
       timeframe,
@@ -1323,6 +1349,8 @@ export class ViipersHarness extends DurableObject<Env> {
             strategy: status.strategy,
             broker: status.broker,
             tradingMode: status.tradingMode,
+            // Visitors only learn that the broker is unreachable, never why.
+            brokerConnected: status.brokerError === null,
             account: toPublicAccount(status.account),
             positions: status.positions.map(toPublicPosition),
             clock: status.clock,
@@ -1369,12 +1397,10 @@ export class ViipersHarness extends DurableObject<Env> {
       try {
         body = JSON.stringify({ ok: true, data: await build() });
       } catch (error) {
+        // Logged once per TTL (the failure is cached below). Never echo provider errors to
+        // anonymous viewers; the page shows a "broker unavailable" banner from the status flag.
         this.log("System", "public_view_error", { resource, error: String(error) });
-        // Never echo provider errors to anonymous viewers.
-        return new Response(JSON.stringify({ ok: false, error: "Temporarily unavailable" }), {
-          status: 503,
-          headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
-        });
+        body = JSON.stringify({ ok: false, error: "Temporarily unavailable" });
       }
       this.publicCache.set(cacheKey, { expiresAt: Date.now() + ttlMs, body });
     }
@@ -1399,9 +1425,30 @@ export class ViipersHarness extends DurableObject<Env> {
       );
     }
 
+    const previousBroker = resolveBrokerProvider(this.env, this.state.config.broker_provider);
+    const nextBroker = resolveBrokerProvider(this.env, validation.data.broker_provider);
+    if (nextBroker !== previousBroker) {
+      const missing = missingBrokerSecrets(this.env, nextBroker);
+      if (missing.length > 0) {
+        return new Response(
+          JSON.stringify({
+            ok: false,
+            error: `Cannot switch to ${nextBroker.toUpperCase()}: missing secrets ${missing.join(", ")}`,
+          }),
+          { status: 400, headers: { "Content-Type": "application/json" } }
+        );
+      }
+    }
+
     this.state.config = validation.data;
     this.initializeLLM();
     await this.persist();
+    // Cron jobs and MCP tools read the broker choice from KV (they have no harness state).
+    await storeBrokerOverride(this.env, this.state.config.broker_provider);
+    if (nextBroker !== previousBroker) {
+      this.publicCache.clear();
+      this.log("System", "broker_switched", { from: previousBroker, to: nextBroker });
+    }
     return this.jsonResponse({ ok: true, config: this.state.config });
   }
 
@@ -1436,11 +1483,8 @@ export class ViipersHarness extends DurableObject<Env> {
       const data = await this.collectHistory(period, timeframe, intradayReporting || "extended_hours");
       return this.jsonResponse({ ok: true, data });
     } catch (error) {
-      this.log("System", "history_error", { error: String(error) });
-      return new Response(JSON.stringify({ ok: false, error: String(error) }), {
-        status: 500,
-        headers: { "Content-Type": "application/json" },
-      });
+      // Not logged: the dashboard polls this, and the status banner already shows broker errors.
+      return this.jsonResponse({ ok: false, error: brokerErrorMessage(error) });
     }
   }
 

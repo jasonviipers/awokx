@@ -23,8 +23,8 @@
     "setup:access": "bun scripts/setup-access.ts",
     "audit:unused": "bun scripts/audit-unused.mjs",
     "audit:security": "bun audit",
-    "secrets:push": "cp .env .dev.vars && wrangler secret bulk .env",
-    "secrets:push:production": "wrangler secret bulk .env --env production"
+    "secrets:push": "cp .env .dev.vars && bun scripts/push-secrets.mjs --config wrangler.deploy.json",
+    "secrets:push:production": "bun scripts/push-secrets.mjs --config wrangler.deploy.json"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.74",

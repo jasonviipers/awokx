@@ -11,7 +11,7 @@ async function gatherCrypto(ctx: StrategyContext): Promise<Signal[]> {
 
   const signals: Signal[] = [];
   const symbols = ctx.config.crypto_symbols || ["BTC/USD", "ETH/USD", "SOL/USD"];
-  const providers = createBrokerProviders(ctx.env);
+  const providers = createBrokerProviders(ctx.env, ctx.config.broker_provider);
 
   for (const symbol of symbols) {
     try {

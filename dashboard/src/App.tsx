@@ -122,6 +122,23 @@ function getActionColor(action: string): string {
   return 'text-hud-text'
 }
 
+/** Plain-language next step for the most common broker connection failures. */
+function brokerErrorHint(error: string, broker?: string): string {
+  if (/50119|50111|doesn't exist|invalid ok-access-key/i.test(error)) {
+    return "OKX doesn't recognize this API key. Demo mode (OKX_SIMULATED=true) needs a key created in Demo Trading, and the API domain must match your account's region (my.okx.com → eea.okx.com, app.okx.com → us.okx.com)."
+  }
+  if (/50105|50113|passphrase|sign/i.test(error)) {
+    return 'The OKX secret or passphrase does not match this API key. Re-copy all three values from the same key.'
+  }
+  if (/50110|whitelist|ip/i.test(error)) {
+    return "This server's IP is not on the API key's IP whitelist."
+  }
+  if (/unauthorized|forbidden|401|403/i.test(error)) {
+    return `Check the ${(broker || 'broker').toUpperCase()} API key and secret, and that paper/live mode matches the key.`
+  }
+  return 'Switch brokers in [CONFIG] → Broker, or check the broker credentials.'
+}
+
 function getTradeStatusColor(status: string): string {
   if (status === 'filled') return 'text-hud-success'
   if (status === 'partially_filled' || status === 'new' || status === 'accepted') return 'text-hud-warning'
@@ -390,6 +407,22 @@ export default function App() {
             </span>
           </div>
         </header>
+
+        {(status?.brokerError || status?.brokerConnected === false) && (
+          <div role="alert" className="mb-4 px-4 py-3 border border-hud-error/50 bg-hud-error/10 text-sm">
+            <span className="hud-label text-hud-error mr-2">
+              {(status.broker || 'broker').toUpperCase()} CONNECTION FAILED
+            </span>
+            {admin ? (
+              <>
+                <span className="text-hud-text">{status.brokerError}</span>
+                <span className="block text-hud-text-dim text-xs mt-1">{brokerErrorHint(status.brokerError ?? '', status.broker)}</span>
+              </>
+            ) : (
+              <span className="text-hud-text-dim">Live account data is temporarily unavailable.</span>
+            )}
+          </div>
+        )}
 
         <div className="grid grid-cols-4 md:grid-cols-8 lg:grid-cols-12 gap-4">
           {/* Row 1: Account, Positions, LLM Costs */}

@@ -15,12 +15,12 @@ import type {
 } from "../types";
 import type { OkxClient } from "./client";
 import {
+  DEFAULT_OKX_QUOTE_CCY,
   formatPrice,
   formatQty,
   fromInstId,
   isCashCurrency,
   msToIso,
-  OKX_QUOTE_CCY,
   type OkxBalance,
   type OkxBalanceDetail,
   type OkxInstrument,
@@ -86,13 +86,13 @@ function mapOrderStatus(state: string): OrderStatus {
   }
 }
 
-function parseOkxOrder(raw: OkxOrder): Order {
+function parseOkxOrder(raw: OkxOrder, quoteCcy: string): Order {
   const state = raw.state || raw.ordStatus || "live";
   const filledAt = state === "filled" && raw.fillTime ? msToIso(raw.fillTime) : null;
   return {
     id: raw.ordId,
     client_order_id: raw.clOrdId || "",
-    symbol: fromInstId(raw.instId),
+    symbol: fromInstId(raw.instId, quoteCcy),
     asset_id: raw.instId,
     asset_class: "crypto",
     qty: raw.sz || "0",
@@ -117,13 +117,13 @@ function parseOkxOrder(raw: OkxOrder): Order {
   };
 }
 
-function parseOrderAck(ack: OkxOrderAck, ctx: OrderAckContext): Order {
+function parseOrderAck(ack: OkxOrderAck, quoteCcy: string, ctx: OrderAckContext): Order {
   const now = new Date().toISOString();
   const rejected = ack.sCode && ack.sCode !== "0";
   return {
     id: ack.ordId,
     client_order_id: ack.clOrdId || ctx.clientOrderId || "",
-    symbol: fromInstId(ctx.instId),
+    symbol: fromInstId(ctx.instId, quoteCcy),
     asset_id: ctx.instId,
     asset_class: "crypto",
     qty: ctx.sz,
@@ -152,7 +152,10 @@ export class OkxTradingProvider implements BrokerProvider {
   private instrumentCache = new Map<string, { data: OkxInstrument; fetchedAt: number }>();
   private instIdByOrderId = new Map<string, string>();
 
-  constructor(private client: OkxClient) {}
+  constructor(
+    private client: OkxClient,
+    private quoteCcy: string = DEFAULT_OKX_QUOTE_CCY
+  ) {}
 
   async getBalances(): Promise<OkxBalanceDetail[]> {
     const balance = await this.getBalance();
@@ -164,7 +167,7 @@ export class OkxTradingProvider implements BrokerProvider {
     const totalEq = parseFloat(balance.totalEq) || 0;
     // Orders are placed on <BASE>-USDT pairs, so only available USDT is spendable.
     // totalEq includes crypto holdings and must not be used for position sizing.
-    const quote = (balance.details ?? []).find((detail) => detail.ccy === OKX_QUOTE_CCY);
+    const quote = (balance.details ?? []).find((detail) => detail.ccy === this.quoteCcy);
     const cash = quote ? parseFloat(quote.availBal) || 0 : 0;
     const cashEqUsd = (balance.details ?? [])
       .filter((detail) => isCashCurrency(detail.ccy))
@@ -173,7 +176,7 @@ export class OkxTradingProvider implements BrokerProvider {
       id: "okx-spot",
       account_number: "",
       status: "ACTIVE",
-      currency: OKX_QUOTE_CCY,
+      currency: this.quoteCcy,
       cash,
       buying_power: cash,
       regt_buying_power: 0,
@@ -208,7 +211,7 @@ export class OkxTradingProvider implements BrokerProvider {
       const eq = parseFloat(detail.eq) || 0;
       if (eq <= 0) continue;
 
-      const instId = `${ccy}-${OKX_QUOTE_CCY}`;
+      const instId = `${ccy}-${this.quoteCcy}`;
       if (seen.has(instId)) continue;
       seen.add(instId);
 
@@ -222,7 +225,7 @@ export class OkxTradingProvider implements BrokerProvider {
 
       positions.push({
         asset_id: instId,
-        symbol: fromInstId(instId),
+        symbol: fromInstId(instId, this.quoteCcy),
         exchange: "OKX",
         asset_class: "crypto",
         avg_entry_price: 0,
@@ -244,13 +247,13 @@ export class OkxTradingProvider implements BrokerProvider {
   }
 
   async getPosition(symbol: string): Promise<Position | null> {
-    const target = toInstId(symbol);
+    const target = toInstId(symbol, this.quoteCcy);
     const positions = await this.getPositions();
-    return positions.find((position) => toInstId(position.symbol) === target) ?? null;
+    return positions.find((position) => toInstId(position.symbol, this.quoteCcy) === target) ?? null;
   }
 
   async closePosition(symbol: string, qty?: number, percentage?: number): Promise<Order> {
-    const instId = toInstId(symbol);
+    const instId = toInstId(symbol, this.quoteCcy);
     const [base] = instId.split("-");
 
     // availBal excludes funds frozen in open orders, which OKX would reject as insufficient.
@@ -286,11 +289,11 @@ export class OkxTradingProvider implements BrokerProvider {
       sz,
     });
 
-    return parseOrderAck(ack, { instId, side: "sell", ordType: "market", sz });
+    return parseOrderAck(ack, this.quoteCcy, { instId, side: "sell", ordType: "market", sz });
   }
 
   async createOrder(params: OrderParams): Promise<Order> {
-    const instId = toInstId(params.symbol);
+    const instId = toInstId(params.symbol, this.quoteCcy);
     const instrument = await this.getInstrument(instId);
     if (!instrument) {
       throw createError(ErrorCode.NOT_FOUND, `Instrument not found: ${instId}`);
@@ -366,7 +369,7 @@ export class OkxTradingProvider implements BrokerProvider {
     }
 
     const ack = await this.placeOrder(body);
-    return parseOrderAck(ack, {
+    return parseOrderAck(ack, this.quoteCcy, {
       instId,
       side,
       ordType,
@@ -427,18 +430,15 @@ export class OkxTradingProvider implements BrokerProvider {
       throw createError(ErrorCode.PROVIDER_ERROR, "OKX returned no algo order acknowledgement");
     }
 
-    return parseOrderAck(
-      { ordId: ack.algoId, clOrdId: ack.algoClOrdId, sCode: ack.sCode },
-      {
-        instId,
-        side: params.side,
-        ordType: params.type,
-        sz,
-        clientOrderId: body.algoClOrdId as string | undefined,
-        limitPrice,
-        stopPrice,
-      }
-    );
+    return parseOrderAck({ ordId: ack.algoId, clOrdId: ack.algoClOrdId, sCode: ack.sCode }, this.quoteCcy, {
+      instId,
+      side: params.side,
+      ordType: params.type,
+      sz,
+      clientOrderId: body.algoClOrdId as string | undefined,
+      limitPrice,
+      stopPrice,
+    });
   }
 
   async getOrder(orderId: string): Promise<Order> {
@@ -452,7 +452,7 @@ export class OkxTradingProvider implements BrokerProvider {
       const hit = byId?.find((order) => order.ordId === orderId);
       if (hit) {
         this.registerOrder(hit);
-        return parseOkxOrder(hit);
+        return parseOkxOrder(hit, this.quoteCcy);
       }
     }
 
@@ -465,7 +465,7 @@ export class OkxTradingProvider implements BrokerProvider {
     const pendingHit = pending?.find((order) => order.ordId === orderId);
     if (pendingHit) {
       this.registerOrder(pendingHit);
-      return parseOkxOrder(pendingHit);
+      return parseOkxOrder(pendingHit, this.quoteCcy);
     }
 
     const history = await this.client.privateRequest<OkxOrder[]>("GET", "/api/v5/trade/orders-history", {
@@ -475,7 +475,7 @@ export class OkxTradingProvider implements BrokerProvider {
     const historyHit = history?.find((order) => order.ordId === orderId);
     if (historyHit) {
       this.registerOrder(historyHit);
-      return parseOkxOrder(historyHit);
+      return parseOkxOrder(historyHit, this.quoteCcy);
     }
 
     throw createError(ErrorCode.NOT_FOUND, `Order not found: ${orderId}`);
@@ -504,7 +504,7 @@ export class OkxTradingProvider implements BrokerProvider {
 
     let filtered = rawOrders;
     if (params?.symbols?.length) {
-      const symbolSet = new Set(params.symbols.map(toInstId));
+      const symbolSet = new Set(params.symbols.map((s) => toInstId(s, this.quoteCcy)));
       filtered = filtered.filter((order) => symbolSet.has(order.instId));
     }
 
@@ -514,7 +514,7 @@ export class OkxTradingProvider implements BrokerProvider {
       if (seen.has(order.ordId)) continue;
       seen.add(order.ordId);
       this.registerOrder(order);
-      orders.push(parseOkxOrder(order));
+      orders.push(parseOkxOrder(order, this.quoteCcy));
       if (orders.length >= limit) break;
     }
     return orders;
@@ -614,7 +614,7 @@ export class OkxTradingProvider implements BrokerProvider {
   }
 
   async getAsset(symbol: string): Promise<Asset | null> {
-    const instId = toInstId(symbol);
+    const instId = toInstId(symbol, this.quoteCcy);
     const instrument = await this.getInstrument(instId);
     if (!instrument) {
       return null;
@@ -624,7 +624,7 @@ export class OkxTradingProvider implements BrokerProvider {
       id: instrument.instId,
       class: "crypto",
       exchange: "OKX",
-      symbol: fromInstId(instrument.instId),
+      symbol: fromInstId(instrument.instId, this.quoteCcy),
       name: instrument.instId,
       status: active ? "active" : "inactive",
       tradable: active,
@@ -696,6 +696,6 @@ export class OkxTradingProvider implements BrokerProvider {
   }
 }
 
-export function createOkxTradingProvider(client: OkxClient): OkxTradingProvider {
-  return new OkxTradingProvider(client);
+export function createOkxTradingProvider(client: OkxClient, quoteCcy?: string): OkxTradingProvider {
+  return new OkxTradingProvider(client, quoteCcy);
 }

@@ -33,6 +33,7 @@
     "DEFAULT_APPROVAL_TTL_SECONDS": "300",
     "BROKER_PROVIDER": "alpaca",
     "OKX_SIMULATED": "false",
+    "OKX_QUOTE_CCY": "USDC",
     "PUBLIC_DASHBOARD": "true"
   },
   "d1_databases": [

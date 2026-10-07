@@ -9,7 +9,7 @@ import { getDefaultPolicyConfig, type PolicyConfig } from "../policy/config";
 import { PolicyEngine } from "../policy/engine";
 import { createAlpacaProviders } from "../providers/alpaca";
 import { getDTE } from "../providers/alpaca/options";
-import { type BrokerProviders, createBrokerProviders } from "../providers/broker";
+import { type BrokerProviders, createBrokerProviders, getStoredBrokerOverride } from "../providers/broker";
 import { classifyEvent, generateResearchReport, summarizeLearnedRules } from "../providers/llm/classifier";
 import { createLLMProvider } from "../providers/llm/factory";
 import { extractFinancialData, isAllowedDomain, scrapeUrl } from "../providers/scraper";
@@ -57,7 +57,7 @@ export class ViipersMcpAgent extends McpAgent<Env> {
     const db = createD1Client(this.env.DB);
     // Account/order/market-data tools use the configured broker (Alpaca or OKX).
     // Options remain Alpaca-only.
-    const broker = createBrokerProviders(this.env);
+    const broker = createBrokerProviders(this.env, await getStoredBrokerOverride(this.env));
 
     const storedPolicy = await getPolicyConfig(db);
     this.policyConfig = storedPolicy ?? getDefaultPolicyConfig(this.env);

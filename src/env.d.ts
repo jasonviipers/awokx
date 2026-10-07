@@ -15,6 +15,8 @@ export interface Env {
   OKX_API_PASSPHRASE: string;
   OKX_API_BASE_URL?: string;
   OKX_SIMULATED?: string;
+  /** Quote currency for OKX spot pairs: USDT (default), USDC, USD or EUR. */
+  OKX_QUOTE_CCY?: string;
   OPENAI_API_KEY?: string;
   OPENAI_BASE_URL?: string;
   ANTHROPIC_API_KEY?: string;

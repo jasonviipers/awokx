@@ -25,7 +25,7 @@ export async function researchCrypto(
   }
 
   try {
-    const providers = createBrokerProviders(ctx.env);
+    const providers = createBrokerProviders(ctx.env, ctx.config.broker_provider);
     const snapshot = await providers.marketData.getCryptoSnapshot(symbol).catch(() => null);
     const price = snapshot?.latest_trade?.price || 0;
     const dailyChange = snapshot

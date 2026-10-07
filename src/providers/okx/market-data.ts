@@ -1,6 +1,7 @@
 import type { Bar, BarsParams, MarketDataProvider, Quote, Snapshot } from "../types";
 import type { OkxClient } from "./client";
 import {
+  DEFAULT_OKX_QUOTE_CCY,
   fromInstId,
   mapTimeframe,
   msToIso,
@@ -29,9 +30,9 @@ function toBar(candle: OkxCandle | null): Bar {
   };
 }
 
-function toQuote(ticker: OkxTicker): Quote {
+function toQuote(ticker: OkxTicker, quoteCcy: string): Quote {
   return {
-    symbol: fromInstId(ticker.instId),
+    symbol: fromInstId(ticker.instId, quoteCcy),
     bid_price: parseFloat(ticker.bidPx) || 0,
     bid_size: parseFloat(ticker.bidSz) || 0,
     ask_price: parseFloat(ticker.askPx) || 0,
@@ -41,10 +42,13 @@ function toQuote(ticker: OkxTicker): Quote {
 }
 
 export class OkxMarketDataProvider implements MarketDataProvider {
-  constructor(private client: OkxClient) {}
+  constructor(
+    private client: OkxClient,
+    private quoteCcy: string = DEFAULT_OKX_QUOTE_CCY
+  ) {}
 
   async getBars(symbol: string, timeframe: string, params?: BarsParams): Promise<Bar[]> {
-    const instId = toInstId(symbol);
+    const instId = toInstId(symbol, this.quoteCcy);
     const bar = mapTimeframe(timeframe);
 
     const rawCandles = await this.client.publicRequest<OkxCandleRaw[]>("GET", "/api/v5/market/candles", {
@@ -88,12 +92,12 @@ export class OkxMarketDataProvider implements MarketDataProvider {
   }
 
   async getQuote(symbol: string): Promise<Quote> {
-    const instId = toInstId(symbol);
+    const instId = toInstId(symbol, this.quoteCcy);
     const [ticker] = await this.client.publicRequest<OkxTicker[]>("GET", "/api/v5/market/ticker", { instId });
     if (!ticker) {
       throw new Error(`No quote data for ${symbol}`);
     }
-    return toQuote(ticker);
+    return toQuote(ticker, this.quoteCcy);
   }
 
   async getQuotes(symbols: string[]): Promise<Record<string, Quote>> {
@@ -102,17 +106,17 @@ export class OkxMarketDataProvider implements MarketDataProvider {
     });
     const result: Record<string, Quote> = {};
     for (const symbol of symbols) {
-      const instId = toInstId(symbol);
+      const instId = toInstId(symbol, this.quoteCcy);
       const ticker = (tickers ?? []).find((entry) => entry.instId === instId);
       if (ticker) {
-        result[symbol] = toQuote(ticker);
+        result[symbol] = toQuote(ticker, this.quoteCcy);
       }
     }
     return result;
   }
 
   async getSnapshot(symbol: string): Promise<Snapshot> {
-    const instId = toInstId(symbol);
+    const instId = toInstId(symbol, this.quoteCcy);
 
     const [ticker, minuteCandles, dailyCandles] = await Promise.all([
       this.client.publicRequest<OkxTicker[]>("GET", "/api/v5/market/ticker", { instId }),
@@ -131,14 +135,14 @@ export class OkxMarketDataProvider implements MarketDataProvider {
     const prevDaily = dailyAsc.length > 1 ? dailyAsc[0]! : daily;
 
     return {
-      symbol: fromInstId(instId),
+      symbol: fromInstId(instId, this.quoteCcy),
       latest_trade: {
         price: parseFloat(current.last) || 0,
         size: parseFloat(current.lastSz) || 0,
         timestamp: current.ts,
       },
       latest_quote: {
-        symbol: fromInstId(instId),
+        symbol: fromInstId(instId, this.quoteCcy),
         bid_price: parseFloat(current.bidPx) || 0,
         bid_size: parseFloat(current.bidSz) || 0,
         ask_price: parseFloat(current.askPx) || 0,
@@ -166,6 +170,6 @@ export class OkxMarketDataProvider implements MarketDataProvider {
   }
 }
 
-export function createOkxMarketDataProvider(client: OkxClient): OkxMarketDataProvider {
-  return new OkxMarketDataProvider(client);
+export function createOkxMarketDataProvider(client: OkxClient, quoteCcy?: string): OkxMarketDataProvider {
+  return new OkxMarketDataProvider(client, quoteCcy);
 }

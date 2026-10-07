@@ -1,10 +1,12 @@
 /**
- * Twitter integration — confirmation signals and breaking news detection.
+ * X (formerly Twitter) integration — confirmation signals and breaking news detection.
  *
- * Twitter is used for CONFIRMATION only — it boosts/reduces confidence
+ * X is used for CONFIRMATION only — it boosts/reduces confidence
  * on signals from other sources, doesn't generate signals itself.
  *
- * Enable with TWITTER_BEARER_TOKEN secret.
+ * Enable with the TWITTER_BEARER_TOKEN secret: an X API app-only Bearer Token
+ * (developer.x.com). Uses GET /2/tweets/search/recent — last 7 days, 512-char queries.
+ * API reference for agents: https://docs.x.com/llms.txt, https://docs.x.com/skill.md
  */
 
 import type { TwitterConfirmation } from "../../../core/types";
@@ -12,6 +14,11 @@ import type { StrategyContext } from "../../types";
 
 const MAX_DAILY_READS = 200;
 const ONE_DAY_MS = 86400_000;
+
+/** X API v2 (docs.x.com). api.twitter.com is the legacy hostname. */
+const X_API_BASE = "https://api.x.com";
+/** Recent search rejects queries longer than this. */
+const X_MAX_QUERY_LENGTH = 512;
 
 // ── Rate limiting ────────────────────────────────────────────────────────────
 
@@ -63,21 +70,37 @@ async function twitterSearchRecent(
 > {
   if (!isTwitterEnabled(ctx) || !canSpendTwitterRead(ctx)) return [];
 
+  // Back off until X's rate-limit window resets after a 429.
+  const pausedUntil = ctx.state.get<number>("twitterRateLimitedUntil") ?? 0;
+  if (Date.now() < pausedUntil) return [];
+
+  if (query.length > X_MAX_QUERY_LENGTH) {
+    ctx.log("Twitter", "query_too_long", { length: query.length, max: X_MAX_QUERY_LENGTH });
+    return [];
+  }
+
   try {
     const params = new URLSearchParams({
       query,
-      max_results: Math.min(maxResults, 10).toString(),
+      // Recent search accepts 10-100 results per request.
+      max_results: Math.min(Math.max(maxResults, 10), 100).toString(),
       "tweet.fields": "created_at,public_metrics,author_id",
       expansions: "author_id",
       "user.fields": "username,public_metrics",
     });
 
-    const res = await fetch(`https://api.twitter.com/2/tweets/search/recent?${params}`, {
-      headers: {
-        Authorization: `Bearer ${ctx.env.TWITTER_BEARER_TOKEN}`,
-        "Content-Type": "application/json",
-      },
+    const res = await fetch(`${X_API_BASE}/2/tweets/search/recent?${params}`, {
+      headers: { Authorization: `Bearer ${ctx.env.TWITTER_BEARER_TOKEN}` },
     });
+
+    if (res.status === 429) {
+      // x-rate-limit-reset is a Unix timestamp (seconds); fall back to the 15-minute window.
+      const resetSeconds = Number(res.headers.get("x-rate-limit-reset"));
+      const until = Number.isFinite(resetSeconds) && resetSeconds > 0 ? resetSeconds * 1000 : Date.now() + 15 * 60_000;
+      ctx.state.set("twitterRateLimitedUntil", until);
+      ctx.log("Twitter", "rate_limited", { resume_at: new Date(until).toISOString() });
+      return [];
+    }
 
     if (!res.ok) {
       ctx.log("Twitter", "api_error", { status: res.status });

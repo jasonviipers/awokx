@@ -30,8 +30,9 @@
 	// Broker (default: alpaca). To trade crypto spot on OKX set var BROKER_PROVIDER=okx and:
 	// - OKX_API_KEY, OKX_API_SECRET, OKX_API_PASSPHRASE
 	//     Use a dedicated sub-account key with Read + Trade only (never Withdraw),
-	//     bind it to an IP whitelist, and start with OKX_SIMULATED=true.
+	//     leave the IP whitelist empty (Workers have no fixed egress IP), and start with OKX_SIMULATED=true.
 	// - OKX_SIMULATED ("true" routes all requests to OKX demo trading; needs a demo-trading key)
+	// - OKX_QUOTE_CCY (optional var: USDT default; use USDC for EEA/US accounts that hold no USDT)
 	// - OKX_API_BASE_URL (optional, https only):
 	//     default https://openapi.okx.com | EEA (my.okx.com) https://eea.okx.com | US/AU (app.okx.com) https://us.okx.com
 	//

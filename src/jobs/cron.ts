@@ -1,5 +1,5 @@
 import type { Env } from "../env.d";
-import { createBrokerProviders } from "../providers/broker";
+import { createBrokerProviders, getStoredBrokerOverride } from "../providers/broker";
 import { createSECEdgarProvider } from "../providers/news/sec-edgar";
 import { createD1Client } from "../storage/d1/client";
 import { cleanupExpiredApprovals } from "../storage/d1/queries/approvals";
@@ -37,7 +37,7 @@ async function runEventIngestion(env: Env): Promise<void> {
   console.log("Starting event ingestion...");
 
   const db = createD1Client(env.DB);
-  const providers = createBrokerProviders(env);
+  const providers = createBrokerProviders(env, await getStoredBrokerOverride(env));
 
   try {
     const clock = await providers.trading.getClock();
@@ -97,7 +97,7 @@ async function runMarketCloseCleanup(env: Env): Promise<void> {
   console.log("Running market close cleanup...");
 
   const db = createD1Client(env.DB);
-  const providers = createBrokerProviders(env);
+  const providers = createBrokerProviders(env, await getStoredBrokerOverride(env));
 
   try {
     const positions = await providers.trading.getPositions();

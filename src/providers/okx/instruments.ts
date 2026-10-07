@@ -92,12 +92,19 @@ export interface OkxOrder {
 const CASH_CCYS = new Set(["USDT", "USDC", "USD", "EUR"]);
 
 /**
- * Quote currency used for "<BASE>/USD" strategy symbols. OKX delisted most
- * Crypto-USD spot pairs on 2026-09-30, so USD is never used as a quote here.
+ * Quote currency used for "<BASE>/USD" strategy symbols (env OKX_QUOTE_CCY).
+ * Global accounts usually hold USDT; EEA/US accounts hold USDC/USD/EUR instead.
+ * OKX delisted most Crypto-USD spot pairs on 2026-09-30, so prefer USDC over USD.
  */
-export const OKX_QUOTE_CCY = "USDT";
+export const DEFAULT_OKX_QUOTE_CCY = "USDT";
+const SUPPORTED_QUOTE_CCYS = new Set(["USDT", "USDC", "USD", "EUR"]);
 
-export function toInstId(symbol: string): string {
+export function resolveQuoteCcy(value: string | undefined): string {
+  const normalized = value?.trim().toUpperCase();
+  return normalized && SUPPORTED_QUOTE_CCYS.has(normalized) ? normalized : DEFAULT_OKX_QUOTE_CCY;
+}
+
+export function toInstId(symbol: string, quoteCcy: string = DEFAULT_OKX_QUOTE_CCY): string {
   const normalized = symbol.trim().toUpperCase();
   if (normalized.includes("-")) {
     return normalized;
@@ -106,17 +113,17 @@ export function toInstId(symbol: string): string {
   if (!base || !quote) {
     return normalized;
   }
-  const resolvedQuote = quote === "USD" ? OKX_QUOTE_CCY : quote;
+  const resolvedQuote = quote === "USD" ? quoteCcy : quote;
   return `${base}-${resolvedQuote}`;
 }
 
-export function fromInstId(instId: string): string {
+export function fromInstId(instId: string, quoteCcy: string = DEFAULT_OKX_QUOTE_CCY): string {
   const parts = instId.toUpperCase().split("-");
   if (parts.length !== 2) {
     return instId;
   }
   const [base, quote] = parts;
-  return `${base}/${quote === OKX_QUOTE_CCY ? "USD" : quote}`;
+  return `${base}/${quote === quoteCcy ? "USD" : quote}`;
 }
 
 export function isCashCurrency(ccy: string): boolean {

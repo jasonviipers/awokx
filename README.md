@@ -13,7 +13,7 @@ VIIPERS monitors social sentiment from StockTwits and Reddit, uses AI (OpenAI, A
 ## Features
 
 - **24/7 Operation** — Runs on Cloudflare Workers, no local machine required
-- **Multi-Source Signals** — StockTwits, Reddit (4 subreddits), Twitter confirmation
+- **Multi-Source Signals** — StockTwits, Reddit (4 subreddits), X (Twitter) confirmation via api.x.com
 - **Multi-Provider LLM** — OpenAI, Anthropic, Google, xAI, DeepSeek via AI SDK or Cloudflare AI Gateway
 - **Crypto Trading** — Trade BTC, ETH, SOL around the clock
 - **Options Support** — High-conviction options plays
@@ -82,9 +82,16 @@ npx wrangler secret put OPENAI_BASE_URL        # Optional: override OpenAI base 
 
 # Optional
 npx wrangler secret put ALPACA_PAPER         # "true" for paper trading (recommended)
-npx wrangler secret put TWITTER_BEARER_TOKEN
+npx wrangler secret put TWITTER_BEARER_TOKEN # X API app-only Bearer Token (developer.x.com)
 npx wrangler secret put DISCORD_WEBHOOK_URL
 npx wrangler secret put KILL_SWITCH_SECRET   # Emergency kill switch (separate from API token)
+```
+
+Or put everything in `.env` and upload it in one go. Names that `wrangler.deploy.json` already defines as plain `vars` (such as `BROKER_PROVIDER`, `OKX_SIMULATED`) are skipped automatically, and `--dry-run` lists names without uploading:
+
+```bash
+bun run secrets:push          # also copies .env to .dev.vars for local dev
+bun scripts/push-secrets.mjs --config wrangler.deploy.json --dry-run
 ```
 
 ### 4. Deploy

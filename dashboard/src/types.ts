@@ -62,6 +62,7 @@ export interface Config {
   take_profit_pct: number
   stop_loss_pct: number
   position_size_pct_of_cash: number
+  broker_provider?: 'alpaca' | 'okx'
   llm_provider?: 'openai-raw' | 'ai-sdk' | 'cloudflare-gateway'
   llm_model: string
   llm_analyst_model?: string
@@ -213,6 +214,10 @@ export interface Status {
   enabled?: boolean
   broker?: string
   tradingMode?: 'paper' | 'live'
+  /** Admin only: why the broker call failed (bad key, wrong region…). */
+  brokerError?: string | null
+  /** Public only: false when the broker is unreachable. */
+  brokerConnected?: boolean
   account: Account | null
   positions: Position[]
   clock: Clock | null
@@ -231,4 +236,17 @@ export interface Status {
   premarketPlan?: PremarketPlan | null
   stalenessAnalysis?: Record<string, StalenessAnalysis>
   overnightActivity?: OvernightActivity
+}
+
+/** GET /api/brokers — which brokers can be selected in settings. */
+export interface BrokersInfo {
+  active: 'alpaca' | 'okx'
+  envDefault: 'alpaca' | 'okx'
+  brokers: Array<{
+    id: 'alpaca' | 'okx'
+    label: string
+    configured: boolean
+    missingSecrets: string[]
+    tradingMode: 'paper' | 'live'
+  }>
 }
