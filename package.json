@@ -20,7 +20,9 @@
     "check:fix": "biome check --write src/",
     "test": "vitest",
     "test:run": "vitest run",
-    "setup:access": "npx tsx scripts/setup-access.ts"
+    "setup:access": "bun scripts/setup-access.ts",
+    "audit:unused": "bun scripts/audit-unused.mjs",
+    "audit:security": "bun audit"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.74",
@@ -40,6 +42,10 @@
     "typescript": "^7.0.2",
     "vitest": "^5.0.3",
     "wrangler": "^4.148.0"
+  },
+  "overrides": {
+    "@modelcontextprotocol/client": "2.2.0",
+    "sharp": "0.35.5"
   },
   "engines": {
     "node": ">=20.0.0"

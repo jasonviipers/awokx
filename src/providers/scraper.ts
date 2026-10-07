@@ -17,6 +17,7 @@ export interface ScrapeResult {
 export function isAllowedDomain(url: string): boolean {
   try {
     const parsed = new URL(url);
+    if (parsed.protocol !== "https:" || parsed.username || parsed.password || (parsed.port && parsed.port !== "443")) return false;
     return ALLOWED_DOMAINS.some((d) => parsed.hostname === d || parsed.hostname.endsWith(`.${d}`));
   } catch {
     return false;
@@ -32,15 +33,24 @@ export async function scrapeUrl(url: string): Promise<ScrapeResult> {
   const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
   try {
-    const response = await fetch(url, {
-      signal: controller.signal,
-      headers: {
-        "User-Agent": "Mozilla/5.0 (compatible; Mahoraga/1.0; +https://example.com/bot)",
-        Accept: "text/html,application/xhtml+xml",
-      },
-    });
-
-    clearTimeout(timeoutId);
+    let currentUrl = url;
+    let response: Response;
+    for (let redirects = 0; ; redirects++) {
+      if (!isAllowedDomain(currentUrl)) throw createError(ErrorCode.FORBIDDEN, "Redirect destination is not allowed");
+      response = await fetch(currentUrl, {
+        redirect: "manual",
+        signal: controller.signal,
+        headers: {
+          "User-Agent": "Mozilla/5.0 (compatible; Mahoraga/1.0; +https://example.com/bot)",
+          Accept: "text/html,application/xhtml+xml",
+        },
+      });
+      if (![301, 302, 303, 307, 308].includes(response.status)) break;
+      const location = response.headers.get("Location");
+      await response.body?.cancel();
+      if (!location || redirects >= 5) throw createError(ErrorCode.PROVIDER_ERROR, "Invalid or excessive redirects");
+      currentUrl = new URL(location, currentUrl).toString();
+    }
 
     if (!response.ok) {
       throw createError(ErrorCode.PROVIDER_ERROR, `Failed to fetch ${url}: ${response.status}`);
@@ -51,20 +61,37 @@ export async function scrapeUrl(url: string): Promise<ScrapeResult> {
       throw createError(ErrorCode.INVALID_INPUT, `Invalid content type: ${contentType}. Only HTML/text allowed.`);
     }
 
-    let html = await response.text();
+    let html = "";
     let truncated = false;
-
-    if (html.length > MAX_CONTENT_SIZE) {
-      html = html.slice(0, MAX_CONTENT_SIZE);
-      truncated = true;
+    const reader = response.body?.getReader();
+    if (reader) {
+      const decoder = new TextDecoder();
+      let size = 0;
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          const remaining = MAX_CONTENT_SIZE - size;
+          html += decoder.decode(value.subarray(0, remaining), { stream: true });
+          size += value.byteLength;
+          if (size > MAX_CONTENT_SIZE) {
+            truncated = true;
+            await reader.cancel();
+            break;
+          }
+        }
+        html += decoder.decode();
+      } finally {
+        reader.releaseLock();
+      }
     }
 
-    const parsed = new URL(url);
+    const parsed = new URL(currentUrl);
     const title = extractTitle(html);
     const text = extractText(html);
 
     return {
-      url,
+      url: currentUrl,
       domain: parsed.hostname,
       title,
       text: text.slice(0, 50000),
@@ -72,13 +99,13 @@ export async function scrapeUrl(url: string): Promise<ScrapeResult> {
       truncated,
     };
   } catch (error) {
-    clearTimeout(timeoutId);
-
     if (error instanceof Error && error.name === "AbortError") {
       throw createError(ErrorCode.PROVIDER_ERROR, `Request timed out after ${TIMEOUT_MS}ms`);
     }
 
     throw error;
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
 

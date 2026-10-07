@@ -68,16 +68,7 @@ export function createPolicyBroker(deps: PolicyBrokerDeps): StrategyContext["bro
 
   async function getRiskStateOrDefault(): Promise<RiskState> {
     if (!db) {
-      return {
-        kill_switch_active: false,
-        kill_switch_reason: null,
-        kill_switch_at: null,
-        daily_loss_usd: 0,
-        daily_loss_reset_at: null,
-        last_loss_at: null,
-        cooldown_until: null,
-        updated_at: new Date().toISOString(),
-      };
+      throw new Error("Risk database is not configured; new orders are disabled");
     }
     return getRiskState(db);
   }

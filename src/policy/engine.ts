@@ -55,6 +55,16 @@ export class PolicyEngine {
   evaluate(ctx: PolicyContext): PolicyResult {
     const violations: PolicyViolation[] = [];
     const warnings: PolicyWarning[] = [];
+    const notional = this.estimateNotional(ctx.order);
+    if (!Number.isFinite(notional) || notional <= 0) {
+      violations.push({ rule: "invalid_valuation", message: "A positive, finite order valuation is required", current_value: notional, limit_value: "> 0" });
+    }
+    if (!Number.isFinite(ctx.account.equity) || ctx.account.equity <= 0) {
+      violations.push({ rule: "invalid_equity", message: "Account equity must be positive and finite", current_value: ctx.account.equity, limit_value: "> 0" });
+    }
+    if (ctx.account.trading_blocked || ctx.account.account_blocked) {
+      violations.push({ rule: "account_blocked", message: "Broker account is blocked from trading", current_value: true, limit_value: false });
+    }
 
     this.checkKillSwitch(ctx, violations);
     this.checkCooldown(ctx, violations);
@@ -285,6 +295,13 @@ export class PolicyEngine {
   evaluateOptionsOrder(ctx: OptionsPolicyContext): OptionsPolicyResult {
     const violations: PolicyViolation[] = [];
     const warnings: PolicyWarning[] = [];
+    const cost = this.estimateOptionsCost(ctx.order);
+    if (!Number.isFinite(cost) || cost <= 0 || !Number.isInteger(ctx.order.qty) || ctx.order.qty <= 0 || !Number.isFinite(ctx.order.dte)) {
+      violations.push({ rule: "invalid_valuation", message: "Options require a positive cost, whole contract quantity and valid expiration", current_value: cost, limit_value: "> 0" });
+    }
+    if (!Number.isFinite(ctx.account.equity) || ctx.account.equity <= 0 || ctx.account.trading_blocked || ctx.account.account_blocked) {
+      violations.push({ rule: "invalid_account", message: "Account must have positive equity and be enabled for trading", current_value: ctx.account.equity, limit_value: "> 0" });
+    }
 
     this.checkKillSwitch(ctx as unknown as PolicyContext, violations);
     this.checkCooldown(ctx as unknown as PolicyContext, violations);

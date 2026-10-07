@@ -11,7 +11,12 @@ export function nowISO(): string {
 }
 
 export async function hashObject(obj: unknown): Promise<string> {
-  const str = JSON.stringify(obj, Object.keys(obj as object).sort());
+  const str = JSON.stringify(obj, (_key, value) => {
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      return Object.fromEntries(Object.keys(value).sort().map((key) => [key, value[key]]));
+    }
+    return value;
+  });
   const encoder = new TextEncoder();
   const data = encoder.encode(str);
   const digest = await crypto.subtle.digest("SHA-256", data);
@@ -21,6 +26,7 @@ export async function hashObject(obj: unknown): Promise<string> {
 }
 
 export async function hmacSign(data: string, secret: string): Promise<string> {
+  if (!secret) throw new Error("Signing secret is not configured");
   const encoder = new TextEncoder();
   const keyData = encoder.encode(secret);
   const messageData = encoder.encode(data);
@@ -35,6 +41,10 @@ export async function hmacSign(data: string, secret: string): Promise<string> {
 
 export async function hmacVerify(data: string, signature: string, secret: string): Promise<boolean> {
   const expected = await hmacSign(data, secret);
+  return constantTimeCompare(expected, signature);
+}
+
+export function constantTimeCompare(expected: string, signature: string): boolean {
   if (expected.length !== signature.length) return false;
   let mismatch = 0;
   for (let i = 0; i < expected.length; i++) {
@@ -51,7 +61,7 @@ export function parseBoolean(value: string | undefined, defaultValue: boolean): 
 export function parseNumber(value: string | undefined, defaultValue: number): number {
   if (value === undefined) return defaultValue;
   const parsed = parseFloat(value);
-  return Number.isNaN(parsed) ? defaultValue : parsed;
+  return Number.isFinite(parsed) ? parsed : defaultValue;
 }
 
 export function sleep(ms: number): Promise<void> {
@@ -67,11 +77,12 @@ export function sanitizeForLog(obj: unknown): unknown {
   if (obj === null || obj === undefined) return obj;
   if (typeof obj !== "object") return obj;
 
-  const sensitiveKeys = ["password", "secret", "token", "api_key", "apiKey", "authorization", "approval_token"];
+  if (Array.isArray(obj)) return obj.map(sanitizeForLog);
+  const sensitiveKey = /password|secret|token|api[_-]?key|authorization|passphrase|signature|access[_-]?key/i;
 
   const result: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(obj)) {
-    if (sensitiveKeys.some((k) => key.toLowerCase().includes(k))) {
+    if (sensitiveKey.test(key)) {
       result[key] = "[REDACTED]";
     } else if (typeof value === "object") {
       result[key] = sanitizeForLog(value);

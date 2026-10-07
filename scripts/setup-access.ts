@@ -1,4 +1,4 @@
-#!/usr/bin/env npx tsx
+#!/usr/bin/env bun
 /**
  * Cloudflare Access Setup Script
  * 
@@ -100,9 +100,8 @@ async function createAccessPolicy(
   name: string,
   emails: string[]
 ): Promise<AccessPolicy> {
-  const include: AccessPolicy["include"] = emails.length > 0
-    ? emails.map((email) => ({ email: { email } }))
-    : [{ everyone: {} }];
+  if (emails.length === 0) throw new Error("MAHORAGA_ALLOWED_EMAILS must contain at least one allowed email");
+  const include: AccessPolicy["include"] = emails.map((email) => ({ email: { email } }));
 
   return cfFetch<AccessPolicy>(
     `/accounts/${accountId}/access/apps/${appId}/policies`,
@@ -151,6 +150,9 @@ async function main() {
   const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
   const workerUrl = process.env.MAHORAGA_WORKER_URL;
   const allowedEmails = process.env.MAHORAGA_ALLOWED_EMAILS?.split(",").map((e) => e.trim()).filter(Boolean) || [];
+  if (allowedEmails.length === 0) {
+    throw new Error("MAHORAGA_ALLOWED_EMAILS is required. Refusing to create an Access policy that permits everyone.");
+  }
 
   if (!accountId) {
     console.error("❌ CLOUDFLARE_ACCOUNT_ID is required");

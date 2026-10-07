@@ -1,22 +1,13 @@
 import { getHarnessStub } from "./durable-objects/mahoraga-harness";
-import { checkRateLimit, incrementRequest } from "./durable-objects/session";
+import { consumeRateLimit } from "./durable-objects/session";
 import type { Env } from "./env.d";
 import { handleCronEvent } from "./jobs/cron";
-import { parseBoolean } from "./lib/utils";
+import { constantTimeCompare, parseBoolean } from "./lib/utils";
 import { MahoragaMcpAgent } from "./mcp/agent";
 
 export { MahoragaHarness } from "./durable-objects/mahoraga-harness";
 export { SessionDO } from "./durable-objects/session";
 export { MahoragaMcpAgent };
-
-function constantTimeCompare(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let mismatch = 0;
-  for (let i = 0; i < a.length; i++) {
-    mismatch |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  }
-  return mismatch === 0;
-}
 
 function isAuthorized(request: Request, env: Env): boolean {
   const token = env.MAHORAGA_API_TOKEN;
@@ -126,6 +117,8 @@ export default {
       if (!isAuthorized(request, env)) {
         return unauthorizedResponse();
       }
+      const rateCheck = await consumeRateLimit(env, "admin-api");
+      if (!rateCheck.allowed) return Response.json({ error: "Rate limit exceeded", resetAt: rateCheck.resetAt }, { status: 429 });
       return MahoragaMcpAgent.mount("/mcp", { binding: "MCP_AGENT" }).fetch(request, env, ctx);
     }
 
@@ -142,16 +135,14 @@ export default {
         return unauthorizedResponse();
       }
 
-      // Rate limiting via SessionDO
-      const tokenHash = request.headers.get("Authorization")?.slice(7, 15) || "anon";
-      const rateCheck = await checkRateLimit(env, `agent-${tokenHash}`);
-      if (!rateCheck.allowed) {
-        return new Response(JSON.stringify({ error: "Rate limit exceeded", resetAt: rateCheck.resetAt }), {
-          status: 429,
-          headers: { "Content-Type": "application/json" },
-        });
+      // Fixed key: never persist token fragments or create attacker-chosen objects.
+      // Emergency stop remains available even when the normal API quota is exhausted.
+      if (!isKill) {
+        const rateCheck = await consumeRateLimit(env, "admin-api");
+        if (!rateCheck.allowed) {
+          return Response.json({ error: "Rate limit exceeded", resetAt: rateCheck.resetAt }, { status: 429 });
+        }
       }
-      await incrementRequest(env, `agent-${tokenHash}`);
 
       const stub = getHarnessStub(env);
       const agentPath = url.pathname.replace("/agent", "") || "/status";

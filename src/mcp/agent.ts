@@ -340,13 +340,13 @@ export class MahoragaMcpAgent extends McpAgent<Env> {
       async (input) => {
         const startTime = Date.now();
         try {
-          if (!input.qty && !input.notional) {
+          if ((!input.qty && !input.notional) || (input.qty && input.notional)) {
             return {
               content: [
                 {
                   type: "text" as const,
                   text: JSON.stringify(
-                    failure({ code: ErrorCode.INVALID_INPUT, message: "Either qty or notional required" }),
+                    failure({ code: ErrorCode.INVALID_INPUT, message: "Exactly one of qty or notional is required" }),
                     null,
                     2
                   ),
@@ -363,7 +363,7 @@ export class MahoragaMcpAgent extends McpAgent<Env> {
             getRiskState(db),
           ]);
 
-          let estimatedPrice = input.limit_price ?? input.stop_price;
+          let estimatedPrice = input.order_type === "limit" || input.order_type === "stop_limit" ? input.limit_price : undefined;
           if (!estimatedPrice) {
             try {
               const quote = await broker.marketData.getQuote(input.symbol);
@@ -1916,7 +1916,7 @@ export class MahoragaMcpAgent extends McpAgent<Env> {
 
           const dte = getDTE(contractParts.expiration);
           const estimatedPremium =
-            input.limit_price ??
+            (input.order_type === "limit" ? input.limit_price : undefined) ??
             (input.side === "buy" ? snapshot.latest_quote.ask_price : snapshot.latest_quote.bid_price);
           const estimatedCost = input.qty * estimatedPremium * 100;
 

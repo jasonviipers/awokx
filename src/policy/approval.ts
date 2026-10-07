@@ -79,7 +79,7 @@ export async function validateApprovalToken(params: {
 
   const now = new Date();
   const expiresAt = new Date(approval.expires_at);
-  if (now > expiresAt) {
+  if (!Number.isFinite(expiresAt.getTime()) || now >= expiresAt) {
     return { valid: false, reason: "Approval token expired" };
   }
 
@@ -90,6 +90,9 @@ export async function validateApprovalToken(params: {
   }
 
   const orderParams = JSON.parse(approval.order_params_json) as OrderPreview;
+  if (await hashObject(orderParams) !== approval.preview_hash) {
+    return { valid: false, reason: "Approved order has been modified" };
+  }
   const policyResult = JSON.parse(approval.policy_result_json) as PolicyResult;
 
   return {

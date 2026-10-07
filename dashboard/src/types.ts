@@ -185,12 +185,6 @@ export interface PortfolioSnapshot {
   pl_pct: number
 }
 
-export interface PositionHistory {
-  symbol: string
-  prices: number[]
-  timestamps: number[]
-}
-
 /** One entry of the backend model catalog (GET /api/models). */
 export interface ModelInfo {
   provider: 'openai' | 'anthropic' | 'google' | 'xai' | 'deepseek'

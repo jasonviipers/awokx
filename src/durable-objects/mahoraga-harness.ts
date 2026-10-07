@@ -21,9 +21,11 @@ import type {
   SocialSnapshotCacheEntry,
 } from "../core/types";
 import type { Env } from "../env.d";
-import { parseBoolean } from "../lib/utils";
+import { constantTimeCompare, parseBoolean, sanitizeForLog, sleep } from "../lib/utils";
 import { getDefaultPolicyConfig } from "../policy/config";
+import { PolicyEngine } from "../policy/engine";
 import { createAlpacaProviders } from "../providers/alpaca";
+import { getDTE } from "../providers/alpaca/options";
 import { createBrokerProviders, resolveBrokerProvider } from "../providers/broker";
 import { createLLMProvider } from "../providers/llm/factory";
 import { DEFAULT_ANALYST_MODEL, DEFAULT_RESEARCH_MODEL, estimateCostUsd, MODEL_CATALOG } from "../providers/llm/models";
@@ -39,6 +41,8 @@ import {
 import type { AgentConfig } from "../schemas/agent-config";
 import { safeValidateAgentConfig } from "../schemas/agent-config";
 import { createD1Client } from "../storage/d1/client";
+import { getPolicyConfig } from "../storage/d1/queries/policy-config";
+import { enableKillSwitch, getRiskState } from "../storage/d1/queries/risk-state";
 import { activeStrategy } from "../strategy";
 import { DEFAULT_STATE } from "../strategy/default/config";
 import {
@@ -49,7 +53,7 @@ import {
 import { isCryptoSymbol, normalizeCryptoSymbol } from "../strategy/default/helpers/crypto";
 import { tickerCache } from "../strategy/default/helpers/ticker";
 import { runCryptoTrading } from "../strategy/default/rules/crypto-trading";
-import { findBestOptionsContract } from "../strategy/default/rules/options";
+import { findBestOptionsContract, type OptionsContract } from "../strategy/default/rules/options";
 import type { StrategyContext } from "../strategy/types";
 
 // ============================================================================
@@ -155,11 +159,11 @@ export class MahoragaHarness extends DurableObject<Env> {
   // STRATEGY CONTEXT BUILDER
   // ============================================================================
 
-  private buildStrategyContext(): StrategyContext {
+  private async buildStrategyContext(): Promise<StrategyContext> {
     const self = this;
     const db = createD1Client(this.env.DB);
     const providers = createBrokerProviders(this.env);
-    const policyConfig = getDefaultPolicyConfig(this.env);
+    const policyConfig = await getPolicyConfig(db) ?? getDefaultPolicyConfig(this.env);
 
     const broker = createPolicyBroker({
       trading: providers.trading,
@@ -181,7 +185,7 @@ export class MahoragaHarness extends DurableObject<Env> {
       llm: this._llm,
       log: (agent, action, details) => self.log(agent, action, details),
       trackLLMCost: (model, tokensIn, tokensOut) => self.trackLLMCost(model, tokensIn, tokensOut),
-      sleep: (ms) => self.sleep(ms),
+      sleep,
       broker,
       state: {
         get<T>(key: string): T | undefined {
@@ -212,9 +216,8 @@ export class MahoragaHarness extends DurableObject<Env> {
     const premarketPlanWindowMinutes = Math.max(1, this.state.config.premarket_plan_window_minutes ?? 5);
     const marketOpenExecuteWindowMinutes = Math.max(0, this.state.config.market_open_execute_window_minutes ?? 2);
 
-    const ctx = this.buildStrategyContext();
-
     try {
+      const ctx = await this.buildStrategyContext();
       const clock = await ctx.broker.getClock();
       const clockNowMs = Number.isFinite(new Date(clock.timestamp).getTime())
         ? new Date(clock.timestamp).getTime()
@@ -536,7 +539,7 @@ export class MahoragaHarness extends DurableObject<Env> {
     for (const [symbol, data] of aggregated) {
       const analysis = await this.callSignalResearch(ctx, symbol, data.sentiment, data.sources);
       if (analysis) results.push(analysis);
-      await this.sleep(500);
+      await sleep(500);
     }
 
     return results;
@@ -903,11 +906,11 @@ export class MahoragaHarness extends DurableObject<Env> {
   }
 
   private async executeOptionsOrder(
-    contract: { symbol: string; mid_price: number },
+    contract: OptionsContract,
     quantity: number,
     equity: number
   ): Promise<boolean> {
-    if (!this.state.config.options_enabled) return false;
+    if (!this.state.config.options_enabled || resolveBrokerProvider(this.env) !== "alpaca") return false;
 
     const totalCost = contract.mid_price * quantity * 100;
     const maxAllowed = equity * this.state.config.options_max_pct_per_trade;
@@ -923,6 +926,27 @@ export class MahoragaHarness extends DurableObject<Env> {
 
     try {
       const alpaca = createAlpacaProviders(this.env);
+      const db = createD1Client(this.env.DB);
+      const [account, positions, clock, riskState, storedPolicy] = await Promise.all([
+        alpaca.trading.getAccount(), alpaca.trading.getPositions(), alpaca.trading.getClock(),
+        getRiskState(db), getPolicyConfig(db),
+      ]);
+      const policy = new PolicyEngine(storedPolicy ?? getDefaultPolicyConfig(this.env));
+      const result = policy.evaluateOptionsOrder({
+        account, positions, clock, riskState,
+        order: {
+          contract_symbol: contract.symbol, underlying: contract.symbol.replace(/\d.*$/, ""),
+          side: "buy", qty, order_type: "limit", time_in_force: "day",
+          limit_price: Math.round(contract.mid_price * 100) / 100,
+          expiration: contract.expiration, strike: contract.strike,
+          option_type: contract.delta < 0 ? "put" : "call", dte: getDTE(contract.expiration),
+          delta: contract.delta, estimated_premium: Math.round(contract.mid_price * 100) / 100,
+        },
+      });
+      if (!result.allowed) {
+        this.log("Options", "options_buy_rejected", { contract: contract.symbol, violations: result.violations });
+        return false;
+      }
       const order = await alpaca.trading.createOrder({
         symbol: contract.symbol,
         qty,
@@ -1058,15 +1082,6 @@ export class MahoragaHarness extends DurableObject<Env> {
   // HTTP HANDLER
   // ============================================================================
 
-  private constantTimeCompare(a: string, b: string): boolean {
-    if (a.length !== b.length) return false;
-    let mismatch = 0;
-    for (let i = 0; i < a.length; i++) {
-      mismatch |= a.charCodeAt(i) ^ b.charCodeAt(i);
-    }
-    return mismatch === 0;
-  }
-
   private isAuthorized(request: Request): boolean {
     const token = this.env.MAHORAGA_API_TOKEN;
     if (!token) {
@@ -1075,7 +1090,7 @@ export class MahoragaHarness extends DurableObject<Env> {
     }
     const authHeader = request.headers.get("Authorization");
     if (!authHeader?.startsWith("Bearer ")) return false;
-    return this.constantTimeCompare(authHeader.slice(7), token);
+    return constantTimeCompare(authHeader.slice(7), token);
   }
 
   private isKillSwitchAuthorized(request: Request): boolean {
@@ -1083,7 +1098,7 @@ export class MahoragaHarness extends DurableObject<Env> {
     if (!secret) return false;
     const authHeader = request.headers.get("Authorization");
     if (!authHeader?.startsWith("Bearer ")) return false;
-    return this.constantTimeCompare(authHeader.slice(7), secret);
+    return constantTimeCompare(authHeader.slice(7), secret);
   }
 
   private unauthorizedResponse(): Response {
@@ -1403,6 +1418,7 @@ export class MahoragaHarness extends DurableObject<Env> {
 
   private async handleKillSwitch(): Promise<Response> {
     this.state.enabled = false;
+    await enableKillSwitch(createD1Client(this.env.DB), "Emergency kill switch activated via API");
     await this.ctx.storage.deleteAlarm();
     this.state.signalCache = [];
     this.state.signalResearch = {};
@@ -1421,12 +1437,13 @@ export class MahoragaHarness extends DurableObject<Env> {
   // ============================================================================
 
   private log(agent: string, action: string, details: Record<string, unknown>): void {
-    const entry: LogEntry = { timestamp: new Date().toISOString(), agent, action, ...details };
+    const safeDetails = sanitizeForLog(details) as Record<string, unknown>;
+    const entry: LogEntry = { ...safeDetails, timestamp: new Date().toISOString(), agent, action };
     this.state.logs.push(entry);
     if (this.state.logs.length > 500) {
       this.state.logs = this.state.logs.slice(-500);
     }
-    console.log(`[${entry.timestamp}] [${agent}] ${action}`, JSON.stringify(details));
+    console.log(`[${entry.timestamp}] [${agent}] ${action}`, JSON.stringify(safeDetails));
   }
 
   public trackLLMCost(model: string, tokensIn: number, tokensOut: number): number {
@@ -1447,10 +1464,6 @@ export class MahoragaHarness extends DurableObject<Env> {
     return new Response(JSON.stringify(data, null, 2), {
       headers: { "Content-Type": "application/json" },
     });
-  }
-
-  private sleep(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   private async sendDiscordNotification(
@@ -1552,18 +1565,3 @@ export function getHarnessStub(env: Env): DurableObjectStub {
   return env.MAHORAGA_HARNESS.get(id);
 }
 
-export async function getHarnessStatus(env: Env): Promise<unknown> {
-  const stub = getHarnessStub(env);
-  const response = await stub.fetch(new Request("http://harness/status"));
-  return response.json();
-}
-
-export async function enableHarness(env: Env): Promise<void> {
-  const stub = getHarnessStub(env);
-  await stub.fetch(new Request("http://harness/enable"));
-}
-
-export async function disableHarness(env: Env): Promise<void> {
-  const stub = getHarnessStub(env);
-  await stub.fetch(new Request("http://harness/disable"));
-}
