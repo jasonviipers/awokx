@@ -153,7 +153,7 @@ export VIIPERS_TOKEN="your-api-token"
 
 # Enable the agent
 curl -H "Authorization: Bearer $VIIPERS_TOKEN" \
-  https://viipers.bernardoalmeida2004.workers.dev/agent/enable
+  https://viipers.com/agent/enable
 ```
 
 ### 6. Monitor
@@ -161,15 +161,15 @@ curl -H "Authorization: Bearer $VIIPERS_TOKEN" \
 ```bash
 # Check status
 curl -H "Authorization: Bearer $VIIPERS_TOKEN" \
-  https://viipers.bernardoalmeida2004.workers.dev/agent/status
+  https://viipers.com/agent/status
 
 # View logs
 curl -H "Authorization: Bearer $VIIPERS_TOKEN" \
-  https://viipers.bernardoalmeida2004.workers.dev/agent/logs
+  https://viipers.com/agent/logs
 
 # Emergency kill switch (uses separate KILL_SWITCH_SECRET)
 curl -H "Authorization: Bearer $KILL_SWITCH_SECRET" \
-  https://viipers.bernardoalmeida2004.workers.dev/agent/kill
+  https://viipers.com/agent/kill
 
 # Run dashboard locally
 cd dashboard && npm install && npm run dev
@@ -321,7 +321,7 @@ npx wrangler secret put ANTHROPIC_API_KEY # Your Anthropic API key
 All `/agent/*` endpoints require Bearer token authentication using `VIIPERS_API_TOKEN`:
 
 ```bash
-curl -H "Authorization: Bearer $VIIPERS_TOKEN" https://viipers.bernardoalmeida2004.workers.dev/agent/status
+curl -H "Authorization: Bearer $VIIPERS_TOKEN" https://viipers.com/agent/status
 ```
 
 Generate a secure token: `openssl rand -base64 48`
@@ -331,7 +331,7 @@ Generate a secure token: `openssl rand -base64 48`
 The `/agent/kill` endpoint uses a separate `KILL_SWITCH_SECRET` for emergency shutdown:
 
 ```bash
-curl -H "Authorization: Bearer $KILL_SWITCH_SECRET" https://viipers.bernardoalmeida2004.workers.dev/agent/kill
+curl -H "Authorization: Bearer $KILL_SWITCH_SECRET" https://viipers.com/agent/kill
 ```
 
 This immediately disables the agent, cancels all alarms, and clears the signal cache.

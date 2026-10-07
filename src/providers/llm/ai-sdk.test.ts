@@ -209,6 +209,32 @@ describe("AI SDK Provider", () => {
       );
     });
 
+    it("passes system messages via `system` (AI SDK v7 rejects them inside messages)", async () => {
+      const provider = createAISDKProvider({
+        model: "google/gemini-3.8-flash",
+        apiKeys: { google: "test-key" },
+      });
+
+      await provider.complete({
+        messages: [
+          { role: "system", content: "You are a trading analyst." },
+          { role: "system", content: "Reply in JSON." },
+          { role: "user", content: "Analyze NVDA" },
+        ],
+      });
+
+      const call = mockGenerateText.mock.calls.at(-1)![0];
+      expect(call.system).toBe("You are a trading analyst.\n\nReply in JSON.");
+      expect(call.messages).toEqual([{ role: "user", content: "Analyze NVDA" }]);
+      expect(call.messages.some((m: { role: string }) => m.role === "system")).toBe(false);
+    });
+
+    it("omits `system` when there are no system messages", async () => {
+      const provider = createAISDKProvider({ model: "openai/gpt-4o", apiKeys: { openai: "sk-test" } });
+      await provider.complete({ messages: [{ role: "user", content: "Hi" }] });
+      expect(mockGenerateText.mock.calls.at(-1)![0]).not.toHaveProperty("system");
+    });
+
     it("returns completion result with content and usage", async () => {
       mockGenerateText.mockResolvedValueOnce({
         text: "Test response",

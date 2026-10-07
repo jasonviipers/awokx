@@ -122,12 +122,20 @@ export class AISDKProvider implements LLMProvider {
         temperature: params.temperature,
         maxTokens: params.max_tokens,
       });
+      // AI SDK v7 rejects role "system" inside `messages`; instructions go in `system`.
+      const system = params.messages
+        .filter((msg) => msg.role === "system")
+        .map((msg) => msg.content)
+        .join("\n\n");
       const result = await generateText({
         model: provider(modelId),
-        messages: params.messages.map((msg) => ({
-          role: msg.role,
-          content: msg.content,
-        })),
+        ...(system && { system }),
+        messages: params.messages
+          .filter((msg) => msg.role !== "system")
+          .map((msg) => ({
+            role: msg.role as "user" | "assistant",
+            content: msg.content,
+          })),
         ...(settings.temperature !== undefined && { temperature: settings.temperature }),
         maxOutputTokens: settings.maxTokens,
       });

@@ -88,6 +88,7 @@ export class ViipersHarness extends DurableObject<Env> {
   private readonly DISCORD_COOLDOWN_MS = 30 * 60 * 1000;
   /** Short-lived cache for public endpoints so viewers can't drive broker API traffic. */
   private publicCache: Map<string, { expiresAt: number; body: string }> = new Map();
+  private cycleInProgress = false;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -224,7 +225,25 @@ export class ViipersHarness extends DurableObject<Env> {
   // ALARM HANDLER — Main 30-second heartbeat
   // ============================================================================
 
+  /**
+   * One cycle at a time. The scheduled alarm and a manual /trigger (or a slow cycle
+   * overrunning the next alarm) could otherwise run concurrently and place duplicate
+   * orders from the same signals. The running cycle reschedules the next alarm itself.
+   */
   async alarm(): Promise<void> {
+    if (this.cycleInProgress) {
+      this.log("System", "alarm_skipped", { reason: "Previous cycle still running" });
+      return;
+    }
+    this.cycleInProgress = true;
+    try {
+      await this.runCycle();
+    } finally {
+      this.cycleInProgress = false;
+    }
+  }
+
+  private async runCycle(): Promise<void> {
     if (!this.state.enabled) {
       this.log("System", "alarm_skipped", { reason: "Agent not enabled" });
       return;
