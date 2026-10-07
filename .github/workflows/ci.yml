@@ -113,5 +113,13 @@ jobs:
 
       - name: Verify production health
         run: |
-          curl --fail --silent --show-error --retry 8 --retry-all-errors --retry-delay 15 --max-time 15 \
-            https://viipers.com/health | jq --exit-status '.status == "ok"'
+          for i in $(seq 1 8); do
+            if curl --silent --show-error --max-time 15 https://viipers.com/health \
+              | jq --exit-status '.status == "ok"' >/dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "::error::https://viipers.com/health did not return {\"status\":\"ok\"}"
+          curl --silent --show-error --max-time 15 https://viipers.com/health || true
+          exit 1
