@@ -13,7 +13,11 @@ export function nowISO(): string {
 export async function hashObject(obj: unknown): Promise<string> {
   const str = JSON.stringify(obj, (_key, value) => {
     if (value && typeof value === "object" && !Array.isArray(value)) {
-      return Object.fromEntries(Object.keys(value).sort().map((key) => [key, value[key]]));
+      return Object.fromEntries(
+        Object.keys(value)
+          .sort()
+          .map((key) => [key, value[key]])
+      );
     }
     return value;
   });

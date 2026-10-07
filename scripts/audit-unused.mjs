@@ -52,8 +52,15 @@ const tools = {
 const unusedDependencies = []
 for (const [manifest, imports] of packages) {
   const pkg = JSON.parse(readFileSync(resolve(root, manifest), 'utf8'))
+  const usedPeers = new Set()
+  for (const name of imports) {
+    const packageFile = resolve(root, dirname(manifest), 'node_modules', name, 'package.json')
+    if (!existsSync(packageFile)) continue
+    const installed = JSON.parse(readFileSync(packageFile, 'utf8'))
+    for (const peer of Object.keys(installed.peerDependencies ?? {})) usedPeers.add(peer)
+  }
   for (const name of Object.keys({ ...pkg.dependencies, ...pkg.devDependencies })) {
-    if (!imports.has(name) && !tools[manifest].has(name)) unusedDependencies.push(`${manifest}:${name}`)
+    if (!imports.has(name) && !usedPeers.has(name) && !tools[manifest].has(name)) unusedDependencies.push(`${manifest}:${name}`)
   }
 }
 console.log(JSON.stringify({ unusedModules, unusedDependencies }, null, 2))

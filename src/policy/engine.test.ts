@@ -134,6 +134,24 @@ describe("PolicyEngine", () => {
     engine = new PolicyEngine(createTestConfig());
   });
 
+  it.each([0, Number.NaN, Number.POSITIVE_INFINITY])("blocks invalid valuation %s", (notional) => {
+    const result = engine.evaluate(
+      createTestContext({ order: createTestOrder({ notional, qty: undefined, estimated_price: undefined }) })
+    );
+    expect(result.allowed).toBe(false);
+    expect(result.violations.some((violation) => violation.rule === "invalid_valuation")).toBe(true);
+  });
+
+  it("blocks invalid account equity and blocked accounts", () => {
+    const result = engine.evaluate(
+      createTestContext({ account: createTestAccount({ equity: Number.NaN, account_blocked: true }) })
+    );
+    expect(result.allowed).toBe(false);
+    expect(result.violations.map((violation) => violation.rule)).toEqual(
+      expect.arrayContaining(["invalid_equity", "account_blocked"])
+    );
+  });
+
   describe("kill switch", () => {
     it("blocks trades when kill switch is active", () => {
       const ctx = createTestContext({

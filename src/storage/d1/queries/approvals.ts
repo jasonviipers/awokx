@@ -1,8 +1,9 @@
-import { generateId, nowISO } from "../../../lib/utils";
+import { nowISO } from "../../../lib/utils";
 import type { OrderPreview, PolicyResult } from "../../../mcp/types";
 import type { D1Client, OrderApprovalRow } from "../client";
 
 export interface CreateApprovalParams {
+  id: string;
   preview: OrderPreview;
   policyResult: PolicyResult;
   previewHash: string;
@@ -11,7 +12,7 @@ export interface CreateApprovalParams {
 }
 
 export async function createApproval(db: D1Client, params: CreateApprovalParams): Promise<string> {
-  const id = generateId();
+  const id = params.id;
 
   await db.run(
     `INSERT INTO order_approvals (id, preview_hash, order_params_json, policy_result_json, approval_token, expires_at, created_at)

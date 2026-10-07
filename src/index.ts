@@ -118,7 +118,8 @@ export default {
         return unauthorizedResponse();
       }
       const rateCheck = await consumeRateLimit(env, "admin-api");
-      if (!rateCheck.allowed) return Response.json({ error: "Rate limit exceeded", resetAt: rateCheck.resetAt }, { status: 429 });
+      if (!rateCheck.allowed)
+        return Response.json({ error: "Rate limit exceeded", resetAt: rateCheck.resetAt }, { status: 429 });
       return MahoragaMcpAgent.mount("/mcp", { binding: "MCP_AGENT" }).fetch(request, env, ctx);
     }
 

@@ -169,7 +169,11 @@ export async function runCryptoTrading(ctx: StrategyContext, positions: Position
       continue;
     }
 
-    if (research.confidence < ctx.config.min_analyst_confidence) {
+    if (
+      !Number.isFinite(research.confidence) ||
+      research.confidence > 1 ||
+      research.confidence < ctx.config.min_analyst_confidence
+    ) {
       ctx.log("Crypto", "low_confidence", { symbol: signal.symbol, confidence: research.confidence });
       continue;
     }

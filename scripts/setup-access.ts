@@ -10,14 +10,13 @@
  *   CLOUDFLARE_ACCOUNT_ID - Your Cloudflare account ID
  *   MAHORAGA_WORKER_URL - Your worker URL (e.g., https://mahoraga.your-subdomain.workers.dev)
  * 
- * Optional:
  *   MAHORAGA_ALLOWED_EMAILS - Comma-separated list of allowed emails
  * 
  * Usage:
- *   npx tsx scripts/setup-access.ts
+ *   bun scripts/setup-access.ts
  * 
  * Or with environment variables inline:
- *   CLOUDFLARE_API_TOKEN=xxx CLOUDFLARE_ACCOUNT_ID=yyy MAHORAGA_WORKER_URL=https://... npx tsx scripts/setup-access.ts
+ *   CLOUDFLARE_API_TOKEN=xxx CLOUDFLARE_ACCOUNT_ID=yyy MAHORAGA_WORKER_URL=https://... bun scripts/setup-access.ts
  */
 
 const API_BASE = "https://api.cloudflare.com/client/v4";
@@ -179,7 +178,7 @@ async function main() {
   console.log(`Account ID: ${accountId}`);
   console.log(`Worker URL: ${workerUrl}`);
   console.log(`Domain: ${domain}`);
-  console.log(`Allowed Emails: ${allowedEmails.length > 0 ? allowedEmails.join(", ") : "(all - using OTP)"}\n`);
+  console.log(`Allowed Emails: ${allowedEmails.join(", ")}\n`);
 
   const existingApps = await listAccessApplications(accountId);
   const existingApp = existingApps.find((app) => app.domain === domain);
@@ -197,7 +196,7 @@ async function main() {
   console.log(`✓ Created Access Application: ${app.name} (${app.id})`);
 
   console.log("Creating Access Policy...");
-  const policyName = allowedEmails.length > 0 ? "Allowed Users" : "OTP Verification";
+  const policyName = "Allowed Users";
   const policy = await createAccessPolicy(accountId, app.id, policyName, allowedEmails);
   console.log(`✓ Created Access Policy: ${policy.name} (${policy.id})`);
 
@@ -206,14 +205,7 @@ async function main() {
   console.log("Your MAHORAGA endpoints are now protected.");
   console.log(`Dashboard: https://one.dash.cloudflare.com/${accountId}/access/apps/${app.id}`);
   
-  if (allowedEmails.length === 0) {
-    console.log("\n📧 Authentication: One-Time PIN");
-    console.log("   Users will receive an email with a code to access the dashboard.");
-    console.log("   To restrict to specific emails, re-run with:");
-    console.log("   MAHORAGA_ALLOWED_EMAILS=you@example.com,team@example.com npx tsx scripts/setup-access.ts");
-  } else {
-    console.log(`\n📧 Authentication: Email allowlist (${allowedEmails.length} users)`);
-  }
+  console.log(`\nAuthentication: Email allowlist (${allowedEmails.length} users)`);
   
   console.log("\n⚠️  Note: It may take a few minutes for Access to propagate.");
   console.log("=".repeat(60) + "\n");

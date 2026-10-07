@@ -29,6 +29,7 @@ export async function generateApprovalToken(params: GenerateApprovalParams): Pro
   const token = `${approvalId}.${signature}`;
 
   await createApproval(db, {
+    id: approvalId,
     preview,
     policyResult,
     previewHash,
@@ -90,7 +91,7 @@ export async function validateApprovalToken(params: {
   }
 
   const orderParams = JSON.parse(approval.order_params_json) as OrderPreview;
-  if (await hashObject(orderParams) !== approval.preview_hash) {
+  if ((await hashObject(orderParams)) !== approval.preview_hash) {
     return { valid: false, reason: "Approved order has been modified" };
   }
   const policyResult = JSON.parse(approval.policy_result_json) as PolicyResult;

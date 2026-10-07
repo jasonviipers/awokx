@@ -363,7 +363,8 @@ export class MahoragaMcpAgent extends McpAgent<Env> {
             getRiskState(db),
           ]);
 
-          let estimatedPrice = input.order_type === "limit" || input.order_type === "stop_limit" ? input.limit_price : undefined;
+          let estimatedPrice =
+            input.order_type === "limit" || input.order_type === "stop_limit" ? input.limit_price : undefined;
           if (!estimatedPrice) {
             try {
               const quote = await broker.marketData.getQuote(input.symbol);

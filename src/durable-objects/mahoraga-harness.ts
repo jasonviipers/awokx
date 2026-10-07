@@ -163,7 +163,13 @@ export class MahoragaHarness extends DurableObject<Env> {
     const self = this;
     const db = createD1Client(this.env.DB);
     const providers = createBrokerProviders(this.env);
-    const policyConfig = await getPolicyConfig(db) ?? getDefaultPolicyConfig(this.env);
+    const policyConfig = (await getPolicyConfig(db)) ?? getDefaultPolicyConfig(this.env);
+    policyConfig.max_open_positions = Math.min(policyConfig.max_open_positions, this.state.config.max_positions);
+    policyConfig.max_notional_per_trade = Math.min(
+      policyConfig.max_notional_per_trade,
+      this.state.config.max_position_value
+    );
+    policyConfig.deny_symbols = [...new Set([...policyConfig.deny_symbols, ...this.state.config.ticker_blacklist])];
 
     const broker = createPolicyBroker({
       trading: providers.trading,
@@ -804,13 +810,21 @@ export class MahoragaHarness extends DurableObject<Env> {
         }
       }
 
-      if (finalConfidence < this.state.config.min_analyst_confidence) continue;
+      if (
+        !Number.isFinite(finalConfidence) ||
+        finalConfidence > 1 ||
+        finalConfidence < this.state.config.min_analyst_confidence
+      )
+        continue;
 
       // Options routing
       if (entry.useOptions) {
         const contract = await findBestOptionsContract(ctx, entry.symbol, "bullish", account.equity);
         if (contract) {
-          await this.executeOptionsOrder(contract, 1, account.equity);
+          if (await this.executeOptionsOrder(contract, 1, account.equity)) {
+            heldSymbols.add(entry.symbol);
+            continue;
+          }
         }
       }
 
@@ -841,7 +855,12 @@ export class MahoragaHarness extends DurableObject<Env> {
     const entrySymbols = new Set(entries.map((e) => e.symbol));
 
     for (const rec of analysis.recommendations) {
-      if (rec.confidence < this.state.config.min_analyst_confidence) continue;
+      if (
+        !Number.isFinite(rec.confidence) ||
+        rec.confidence > 1 ||
+        rec.confidence < this.state.config.min_analyst_confidence
+      )
+        continue;
 
       if (rec.action === "SELL" && heldSymbols.has(rec.symbol)) {
         const posEntry = this.state.positionEntries[rec.symbol];
@@ -905,11 +924,7 @@ export class MahoragaHarness extends DurableObject<Env> {
     }
   }
 
-  private async executeOptionsOrder(
-    contract: OptionsContract,
-    quantity: number,
-    equity: number
-  ): Promise<boolean> {
+  private async executeOptionsOrder(contract: OptionsContract, quantity: number, equity: number): Promise<boolean> {
     if (!this.state.config.options_enabled || resolveBrokerProvider(this.env) !== "alpaca") return false;
 
     const totalCost = contract.mid_price * quantity * 100;
@@ -928,19 +943,32 @@ export class MahoragaHarness extends DurableObject<Env> {
       const alpaca = createAlpacaProviders(this.env);
       const db = createD1Client(this.env.DB);
       const [account, positions, clock, riskState, storedPolicy] = await Promise.all([
-        alpaca.trading.getAccount(), alpaca.trading.getPositions(), alpaca.trading.getClock(),
-        getRiskState(db), getPolicyConfig(db),
+        alpaca.trading.getAccount(),
+        alpaca.trading.getPositions(),
+        alpaca.trading.getClock(),
+        getRiskState(db),
+        getPolicyConfig(db),
       ]);
       const policy = new PolicyEngine(storedPolicy ?? getDefaultPolicyConfig(this.env));
       const result = policy.evaluateOptionsOrder({
-        account, positions, clock, riskState,
+        account,
+        positions,
+        clock,
+        riskState,
         order: {
-          contract_symbol: contract.symbol, underlying: contract.symbol.replace(/\d.*$/, ""),
-          side: "buy", qty, order_type: "limit", time_in_force: "day",
+          contract_symbol: contract.symbol,
+          underlying: contract.symbol.replace(/\d.*$/, ""),
+          side: "buy",
+          qty,
+          order_type: "limit",
+          time_in_force: "day",
           limit_price: Math.round(contract.mid_price * 100) / 100,
-          expiration: contract.expiration, strike: contract.strike,
-          option_type: contract.delta < 0 ? "put" : "call", dte: getDTE(contract.expiration),
-          delta: contract.delta, estimated_premium: Math.round(contract.mid_price * 100) / 100,
+          expiration: contract.expiration,
+          strike: contract.strike,
+          option_type: contract.delta < 0 ? "put" : "call",
+          dte: getDTE(contract.expiration),
+          delta: contract.delta,
+          estimated_premium: Math.round(contract.mid_price * 100) / 100,
         },
       });
       if (!result.allowed) {
@@ -1564,4 +1592,3 @@ export function getHarnessStub(env: Env): DurableObjectStub {
   const id = env.MAHORAGA_HARNESS.idFromName("main");
   return env.MAHORAGA_HARNESS.get(id);
 }
-

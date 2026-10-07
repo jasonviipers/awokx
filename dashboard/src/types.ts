@@ -226,7 +226,6 @@ export interface Status {
   signalResearch: Record<string, SignalResearch>
   positionResearch: Record<string, PositionResearch>
   portfolioHistory?: PortfolioSnapshot[]
-  positionHistory?: Record<string, PositionHistory>
   positionEntries?: Record<string, PositionEntry>
   twitterConfirmations?: Record<string, TwitterConfirmation>
   premarketPlan?: PremarketPlan | null

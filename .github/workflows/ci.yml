@@ -23,11 +23,26 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      - name: Install dashboard dependencies
+        run: bun install --frozen-lockfile
+        working-directory: dashboard
+
+      - name: Audit dependencies and unused modules
+        run: |
+          bun run audit:unused
+          bun audit
+          cd dashboard
+          bun audit
+
       - name: Run type check
         run: bun run typecheck
 
       - name: Run tests
         run: bun run test:run
+
+      - name: Build dashboard
+        run: bun run build
+        working-directory: dashboard
 
       - name: Check formatting and linting
         run: bun run check
