@@ -1,5 +1,6 @@
 import { createError, ErrorCode } from "../../lib/errors";
 import type { CompletionParams, CompletionResult, LLMProvider } from "../types";
+import { DEFAULT_RESEARCH_MODEL, getRequestSettings } from "./models";
 
 export interface CloudflareGatewayConfig {
   /** Cloudflare account ID (used in gateway URL) */
@@ -79,16 +80,17 @@ export class CloudflareGatewayProvider implements LLMProvider {
 
     this.baseUrl = `https://gateway.ai.cloudflare.com/v1/${config.accountId}/${config.gatewayId}/compat`;
     this.token = config.token;
-    this.model = config.model ?? "openai/gpt-4o-mini";
+    this.model = config.model ?? `openai/${DEFAULT_RESEARCH_MODEL}`;
   }
 
   async complete(params: CompletionParams): Promise<CompletionResult> {
-    const body: Record<string, unknown> = {
-      model: normalizeCloudflareCompatModel(params.model ?? this.model),
-      messages: params.messages,
-      temperature: params.temperature ?? 0.7,
-      max_tokens: params.max_tokens ?? 1024,
-    };
+    const model = normalizeCloudflareCompatModel(params.model ?? this.model);
+    const settings = getRequestSettings(model, { temperature: params.temperature, maxTokens: params.max_tokens });
+    const body: Record<string, unknown> = { model, messages: params.messages, max_tokens: settings.maxTokens };
+    // Reasoning models reject custom temperature.
+    if (settings.temperature !== undefined) {
+      body.temperature = settings.temperature;
+    }
 
     if (params.response_format) {
       body.response_format = params.response_format;

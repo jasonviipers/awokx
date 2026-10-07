@@ -34,8 +34,16 @@ export async function getApprovalByToken(db: D1Client, token: string): Promise<O
   return db.executeOne<OrderApprovalRow>(`SELECT * FROM order_approvals WHERE approval_token = ?`, [token]);
 }
 
-export async function markApprovalUsed(db: D1Client, approvalId: string): Promise<void> {
-  await db.run(`UPDATE order_approvals SET used_at = ? WHERE id = ?`, [nowISO(), approvalId]);
+/**
+ * Atomically claim an approval. Returns false if it was already used, so two
+ * concurrent submits of the same token can never both place an order.
+ */
+export async function markApprovalUsed(db: D1Client, approvalId: string): Promise<boolean> {
+  const result = await db.run(`UPDATE order_approvals SET used_at = ? WHERE id = ? AND used_at IS NULL`, [
+    nowISO(),
+    approvalId,
+  ]);
+  return (result.meta.changes ?? 0) === 1;
 }
 
 export async function cleanupExpiredApprovals(db: D1Client): Promise<number> {

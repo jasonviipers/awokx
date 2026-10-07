@@ -11,6 +11,7 @@
 
 import { DurableObject } from "cloudflare:workers";
 import { createPolicyBroker } from "../core/policy-broker";
+import { getSetupStatus } from "../core/setup";
 import type {
   AgentState,
   LogEntry,
@@ -20,10 +21,21 @@ import type {
   SocialSnapshotCacheEntry,
 } from "../core/types";
 import type { Env } from "../env.d";
+import { parseBoolean } from "../lib/utils";
 import { getDefaultPolicyConfig } from "../policy/config";
 import { createAlpacaProviders } from "../providers/alpaca";
+import { createBrokerProviders, resolveBrokerProvider } from "../providers/broker";
 import { createLLMProvider } from "../providers/llm/factory";
+import { DEFAULT_ANALYST_MODEL, DEFAULT_RESEARCH_MODEL, estimateCostUsd, MODEL_CATALOG } from "../providers/llm/models";
 import type { Account, LLMProvider, MarketClock, Position } from "../providers/types";
+import {
+  PUBLIC_HISTORY_PERIODS,
+  toPublicAccount,
+  toPublicConfig,
+  toPublicLogEntry,
+  toPublicOrder,
+  toPublicPosition,
+} from "../public/snapshot";
 import type { AgentConfig } from "../schemas/agent-config";
 import { safeValidateAgentConfig } from "../schemas/agent-config";
 import { createD1Client } from "../storage/d1/client";
@@ -44,12 +56,20 @@ import type { StrategyContext } from "../strategy/types";
 // DURABLE OBJECT CLASS
 // ============================================================================
 
+type IntradayReporting = "market_hours" | "extended_hours" | "continuous";
+
+const PUBLIC_STATUS_TTL_MS = 10_000;
+const PUBLIC_TRADES_TTL_MS = 30_000;
+const PUBLIC_HISTORY_TTL_MS = 60_000;
+
 export class MahoragaHarness extends DurableObject<Env> {
   private state: AgentState = { ...DEFAULT_STATE };
   private _llm: LLMProvider | null = null;
   private _etDayFormatter: Intl.DateTimeFormat | null = null;
   private discordCooldowns: Map<string, number> = new Map();
   private readonly DISCORD_COOLDOWN_MS = 30 * 60 * 1000;
+  /** Short-lived cache for public endpoints so viewers can't drive broker API traffic. */
+  private publicCache: Map<string, { expiresAt: number; body: string }> = new Map();
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -138,11 +158,11 @@ export class MahoragaHarness extends DurableObject<Env> {
   private buildStrategyContext(): StrategyContext {
     const self = this;
     const db = createD1Client(this.env.DB);
-    const alpaca = createAlpacaProviders(this.env);
+    const providers = createBrokerProviders(this.env);
     const policyConfig = getDefaultPolicyConfig(this.env);
 
     const broker = createPolicyBroker({
-      alpaca,
+      trading: providers.trading,
       policyConfig,
       db,
       log: (agent, action, details) => self.log(agent, action, details),
@@ -535,14 +555,14 @@ export class MahoragaHarness extends DurableObject<Env> {
     if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) return cached;
 
     try {
-      const alpaca = createAlpacaProviders(this.env);
+      const providers = createBrokerProviders(this.env);
       const crypto = isCryptoSymbol(symbol, this.state.config.crypto_symbols || []);
       let price = 0;
       if (crypto) {
-        const snapshot = await alpaca.marketData.getCryptoSnapshot(normalizeCryptoSymbol(symbol)).catch(() => null);
+        const snapshot = await providers.marketData.getCryptoSnapshot(normalizeCryptoSymbol(symbol)).catch(() => null);
         price = snapshot?.latest_trade?.price || snapshot?.latest_quote?.ask_price || 0;
       } else {
-        const snapshot = await alpaca.marketData.getSnapshot(symbol).catch(() => null);
+        const snapshot = await providers.marketData.getSnapshot(symbol).catch(() => null);
         price = snapshot?.latest_trade?.price || snapshot?.latest_quote?.ask_price || 0;
       }
 
@@ -1087,18 +1107,41 @@ export class MahoragaHarness extends DurableObject<Env> {
       "costs",
       "signals",
       "history",
+      "trades",
+      "models",
       "setup/status",
     ];
     if (protectedActions.includes(action)) {
       if (!this.isAuthorized(request)) return this.unauthorizedResponse();
     }
 
+    // Read-only spectator endpoints (no auth, opt-in via PUBLIC_DASHBOARD, GET only)
+    if (action.startsWith("public/")) {
+      if (!parseBoolean(this.env.PUBLIC_DASHBOARD, false)) {
+        return new Response("Not found", { status: 404 });
+      }
+      if (request.method !== "GET") {
+        return new Response("Method not allowed", { status: 405 });
+      }
+      return this.handlePublic(action.slice("public/".length), url);
+    }
+
     try {
       switch (action) {
         case "status":
           return this.handleStatus();
+        case "trades":
+          return this.jsonResponse({ ok: true, data: await this.collectRecentTrades() });
+        case "models":
+          return this.jsonResponse({
+            ok: true,
+            data: {
+              models: MODEL_CATALOG,
+              defaults: { research: DEFAULT_RESEARCH_MODEL, analyst: DEFAULT_ANALYST_MODEL },
+            },
+          });
         case "setup/status":
-          return this.jsonResponse({ ok: true, data: { configured: true } });
+          return this.jsonResponse({ ok: true, data: getSetupStatus(this.env) });
         case "config":
           if (request.method === "POST") return this.handleUpdateConfig(request);
           return this.jsonResponse({ ok: true, data: this.state.config });
@@ -1137,7 +1180,19 @@ export class MahoragaHarness extends DurableObject<Env> {
   }
 
   private async handleStatus(): Promise<Response> {
-    const alpaca = createAlpacaProviders(this.env);
+    return this.jsonResponse({ ok: true, data: await this.collectStatus() });
+  }
+
+  /** "paper" when orders go to a simulated account (Alpaca paper / OKX demo), else "live". */
+  private getTradingMode(): { broker: string; tradingMode: "paper" | "live" } {
+    const broker = resolveBrokerProvider(this.env);
+    const paper =
+      broker === "okx" ? parseBoolean(this.env.OKX_SIMULATED, false) : parseBoolean(this.env.ALPACA_PAPER, true);
+    return { broker, tradingMode: paper ? "paper" : "live" };
+  }
+
+  private async collectStatus() {
+    const providers = createBrokerProviders(this.env);
 
     let account: Account | null = null;
     let positions: Position[] = [];
@@ -1145,9 +1200,9 @@ export class MahoragaHarness extends DurableObject<Env> {
 
     try {
       [account, positions, clock] = await Promise.all([
-        alpaca.trading.getAccount(),
-        alpaca.trading.getPositions(),
-        alpaca.trading.getClock(),
+        providers.trading.getAccount(),
+        providers.trading.getPositions(),
+        providers.trading.getClock(),
       ]);
 
       for (const pos of positions || []) {
@@ -1161,27 +1216,130 @@ export class MahoragaHarness extends DurableObject<Env> {
       // Ignore - will return null
     }
 
-    return this.jsonResponse({
-      ok: true,
-      data: {
-        enabled: this.state.enabled,
-        strategy: activeStrategy.name,
-        account,
-        positions,
-        clock,
-        config: this.state.config,
-        signals: this.state.signalCache,
-        logs: this.state.logs.slice(-100),
-        costs: this.state.costTracker,
-        lastAnalystRun: this.state.lastAnalystRun,
-        lastResearchRun: this.state.lastResearchRun,
-        lastPositionResearchRun: this.state.lastPositionResearchRun,
-        signalResearch: this.state.signalResearch,
-        positionResearch: this.state.positionResearch,
-        positionEntries: this.state.positionEntries,
-        twitterConfirmations: this.state.twitterConfirmations,
-        premarketPlan: this.state.premarketPlan,
-        stalenessAnalysis: this.state.stalenessAnalysis,
+    return {
+      enabled: this.state.enabled,
+      strategy: activeStrategy.name,
+      ...this.getTradingMode(),
+      account,
+      positions,
+      clock,
+      config: this.state.config,
+      signals: this.state.signalCache,
+      logs: this.state.logs.slice(-100),
+      costs: this.state.costTracker,
+      lastAnalystRun: this.state.lastAnalystRun,
+      lastResearchRun: this.state.lastResearchRun,
+      lastPositionResearchRun: this.state.lastPositionResearchRun,
+      signalResearch: this.state.signalResearch,
+      positionResearch: this.state.positionResearch,
+      positionEntries: this.state.positionEntries,
+      twitterConfirmations: this.state.twitterConfirmations,
+      premarketPlan: this.state.premarketPlan,
+      stalenessAnalysis: this.state.stalenessAnalysis,
+    };
+  }
+
+  private async collectRecentTrades() {
+    const providers = createBrokerProviders(this.env);
+    const orders = await providers.trading.listOrders({ status: "all", limit: 50 });
+    return orders.map(toPublicOrder);
+  }
+
+  private async collectHistory(period: string, timeframe: string, intradayReporting: IntradayReporting) {
+    const providers = createBrokerProviders(this.env);
+    const history = await providers.trading.getPortfolioHistory({
+      period,
+      timeframe,
+      intraday_reporting: intradayReporting,
+    });
+    const snapshots = history.timestamp.map((ts, i) => ({
+      timestamp: ts * 1000,
+      equity: history.equity[i],
+      pl: history.profit_loss[i],
+      pl_pct: history.profit_loss_pct[i],
+    }));
+    return { snapshots, base_value: history.base_value, timeframe: history.timeframe };
+  }
+
+  /**
+   * Serve a sanitized, cached snapshot for unauthenticated viewers. Responses are
+   * memoized so any number of viewers costs at most one broker call per TTL.
+   */
+  private async handlePublic(resource: string, url: URL): Promise<Response> {
+    let cacheKey = resource;
+    let ttlMs: number;
+    let build: () => Promise<unknown>;
+
+    switch (resource) {
+      case "status":
+        ttlMs = PUBLIC_STATUS_TTL_MS;
+        build = async () => {
+          const status = await this.collectStatus();
+          return {
+            enabled: status.enabled,
+            strategy: status.strategy,
+            broker: status.broker,
+            tradingMode: status.tradingMode,
+            account: toPublicAccount(status.account),
+            positions: status.positions.map(toPublicPosition),
+            clock: status.clock,
+            config: toPublicConfig(status.config),
+            signals: status.signals,
+            logs: status.logs.map(toPublicLogEntry),
+            costs: status.costs,
+            lastAnalystRun: status.lastAnalystRun,
+            lastResearchRun: status.lastResearchRun,
+            signalResearch: status.signalResearch,
+            positionResearch: status.positionResearch,
+            positionEntries: status.positionEntries,
+            premarketPlan: status.premarketPlan,
+            stalenessAnalysis: status.stalenessAnalysis,
+          };
+        };
+        break;
+      case "history": {
+        const period = url.searchParams.get("period") || "1D";
+        if (!PUBLIC_HISTORY_PERIODS.has(period)) {
+          return new Response(JSON.stringify({ ok: false, error: "Invalid period" }), {
+            status: 400,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        cacheKey = `history:${period}`;
+        ttlMs = PUBLIC_HISTORY_TTL_MS;
+        build = () => this.collectHistory(period, period === "1D" ? "15Min" : "1D", "extended_hours");
+        break;
+      }
+      case "trades":
+        ttlMs = PUBLIC_TRADES_TTL_MS;
+        build = () => this.collectRecentTrades();
+        break;
+      default:
+        return new Response("Not found", { status: 404 });
+    }
+
+    const cached = this.publicCache.get(cacheKey);
+    let body: string;
+    if (cached && cached.expiresAt > Date.now()) {
+      body = cached.body;
+    } else {
+      try {
+        body = JSON.stringify({ ok: true, data: await build() });
+      } catch (error) {
+        this.log("System", "public_view_error", { resource, error: String(error) });
+        // Never echo provider errors to anonymous viewers.
+        return new Response(JSON.stringify({ ok: false, error: "Temporarily unavailable" }), {
+          status: 503,
+          headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
+        });
+      }
+      this.publicCache.set(cacheKey, { expiresAt: Date.now() + ttlMs, body });
+    }
+
+    return new Response(body, {
+      headers: {
+        "Content-Type": "application/json",
+        "Cache-Control": `public, max-age=${Math.floor(ttlMs / 1000)}`,
       },
     });
   }
@@ -1227,33 +1385,13 @@ export class MahoragaHarness extends DurableObject<Env> {
   }
 
   private async handleGetHistory(url: URL): Promise<Response> {
-    const alpaca = createAlpacaProviders(this.env);
     const period = url.searchParams.get("period") || "1M";
     const timeframe = url.searchParams.get("timeframe") || "1D";
-    const intradayReporting = url.searchParams.get("intraday_reporting") as
-      | "market_hours"
-      | "extended_hours"
-      | "continuous"
-      | null;
+    const intradayReporting = url.searchParams.get("intraday_reporting") as IntradayReporting | null;
 
     try {
-      const history = await alpaca.trading.getPortfolioHistory({
-        period,
-        timeframe,
-        intraday_reporting: intradayReporting || "extended_hours",
-      });
-
-      const snapshots = history.timestamp.map((ts, i) => ({
-        timestamp: ts * 1000,
-        equity: history.equity[i],
-        pl: history.profit_loss[i],
-        pl_pct: history.profit_loss_pct[i],
-      }));
-
-      return this.jsonResponse({
-        ok: true,
-        data: { snapshots, base_value: history.base_value, timeframe: history.timeframe },
-      });
+      const data = await this.collectHistory(period, timeframe, intradayReporting || "extended_hours");
+      return this.jsonResponse({ ok: true, data });
     } catch (error) {
       this.log("System", "history_error", { error: String(error) });
       return new Response(JSON.stringify({ ok: false, error: String(error) }), {
@@ -1292,12 +1430,7 @@ export class MahoragaHarness extends DurableObject<Env> {
   }
 
   public trackLLMCost(model: string, tokensIn: number, tokensOut: number): number {
-    const pricing: Record<string, { input: number; output: number }> = {
-      "gpt-4o": { input: 2.5, output: 10 },
-      "gpt-4o-mini": { input: 0.15, output: 0.6 },
-    };
-    const rates = pricing[model] ?? pricing["gpt-4o"]!;
-    const cost = (tokensIn * rates.input + tokensOut * rates.output) / 1_000_000;
+    const cost = estimateCostUsd(model, tokensIn, tokensOut);
 
     this.state.costTracker.total_usd += cost;
     this.state.costTracker.calls++;

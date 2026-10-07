@@ -10,6 +10,8 @@ export const AgentConfigSchema = z
 
     max_position_value: z.number().positive().max(100000),
     max_positions: z.number().int().min(1).max(50),
+    /** Baseline for total P&L on the dashboard (optional; dashboard falls back to history). */
+    starting_equity: z.number().positive().optional(),
     min_sentiment_score: z.number().min(0).max(1),
     min_analyst_confidence: z.number().min(0).max(1),
 

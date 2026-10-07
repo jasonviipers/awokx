@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { motion, AnimatePresence } from 'motion/react'
 import clsx from 'clsx'
 import { Panel } from './components/Panel'
@@ -6,28 +6,13 @@ import { Metric, MetricInline } from './components/Metric'
 import { StatusIndicator, StatusBar } from './components/StatusIndicator'
 import { SettingsModal } from './components/SettingsModal'
 import { SetupWizard } from './components/SetupWizard'
-import { LineChart, Sparkline } from './components/LineChart'
+import { LineChart } from './components/LineChart'
+import { API_BASE, authFetch, isAdmin, saveConfig, setApiToken, viewerFetch } from './api'
+import { getMarketHours } from './market-hours'
 import { NotificationBell } from './components/NotificationBell'
 import { Tooltip, TooltipContent } from './components/Tooltip'
-import type { Status, Config, LogEntry, Signal, Position, SignalResearch, PortfolioSnapshot } from './types'
-
-const API_BASE = '/api'
-
-function getApiToken(): string {
-  return localStorage.getItem('mahoraga_api_token') || (window as unknown as { VITE_MAHORAGA_API_TOKEN?: string }).VITE_MAHORAGA_API_TOKEN || ''
-}
-
-function authFetch(url: string, options: RequestInit = {}): Promise<Response> {
-  const token = getApiToken()
-  const headers = new Headers(options.headers)
-  if (token) {
-    headers.set('Authorization', `Bearer ${token}`)
-  }
-  if (!headers.has('Content-Type') && options.body) {
-    headers.set('Content-Type', 'application/json')
-  }
-  return fetch(url, { ...options, headers })
-}
+import { AdminLogin } from './components/AdminLogin'
+import type { Status, Config, LogEntry, Signal, Position, SignalResearch, PortfolioSnapshot, Trade } from './types'
 
 function formatCurrency(amount: number): string {
   return new Intl.NumberFormat('en-US', {
@@ -104,11 +89,13 @@ function getSentimentColor(score: number): string {
   return 'text-hud-warning'
 }
 
-async function fetchPortfolioHistory(period: string = '1D'): Promise<PortfolioSnapshot[]> {
+async function fetchPortfolioHistory(period: string, admin: boolean): Promise<PortfolioSnapshot[]> {
   try {
     const timeframe = period === '1D' ? '15Min' : '1D'
     const intraday = period === '1D' ? '&intraday_reporting=extended_hours' : ''
-    const res = await authFetch(`${API_BASE}/history?period=${period}&timeframe=${timeframe}${intraday}`)
+    // The public endpoint derives timeframe from period server-side.
+    const query = admin ? `?period=${period}&timeframe=${timeframe}${intraday}` : `?period=${period}`
+    const res = await viewerFetch(`/history${query}`, admin)
     const data = await res.json()
     if (data.ok && data.data?.snapshots) {
       return data.data.snapshots
@@ -119,23 +106,34 @@ async function fetchPortfolioHistory(period: string = '1D'): Promise<PortfolioSn
   }
 }
 
-// Generate mock price history for positions
-function generateMockPriceHistory(currentPrice: number, unrealizedPl: number, points: number = 20): number[] {
-  const prices: number[] = []
-  const isPositive = unrealizedPl >= 0
-  const startPrice = currentPrice * (isPositive ? 0.95 : 1.05)
-  
-  for (let i = 0; i < points; i++) {
-    const progress = i / (points - 1)
-    const trend = startPrice + (currentPrice - startPrice) * progress
-    const noise = trend * (Math.random() - 0.5) * 0.02
-    prices.push(trend + noise)
+async function fetchTrades(admin: boolean): Promise<Trade[] | null> {
+  try {
+    const res = await viewerFetch('/trades', admin)
+    const data = await res.json()
+    return data.ok && Array.isArray(data.data) ? data.data : null
+  } catch {
+    return null
   }
-  prices[prices.length - 1] = currentPrice
-  return prices
 }
 
+function getActionColor(action: string): string {
+  if (/fail|error|blocked|rejected|skipped/i.test(action)) return 'text-hud-error'
+  if (/executed|filled|opened|closed/i.test(action)) return 'text-hud-success'
+  return 'text-hud-text'
+}
+
+function getTradeStatusColor(status: string): string {
+  if (status === 'filled') return 'text-hud-success'
+  if (status === 'partially_filled' || status === 'new' || status === 'accepted') return 'text-hud-warning'
+  return 'text-hud-error'
+}
+
+const PUBLIC_DISABLED = 'PUBLIC_DISABLED'
+
 export default function App() {
+  // No stored token = read-only spectator view. Config/control endpoints stay admin-only server-side.
+  const [admin] = useState(isAdmin)
+  const [showLogin, setShowLogin] = useState(false)
   const [status, setStatus] = useState<Status | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [showSettings, setShowSettings] = useState(false)
@@ -144,8 +142,16 @@ export default function App() {
   const [time, setTime] = useState(new Date())
   const [portfolioHistory, setPortfolioHistory] = useState<PortfolioSnapshot[]>([])
   const [portfolioPeriod, setPortfolioPeriod] = useState<'1D' | '1W' | '1M'>('1D')
+  const [trades, setTrades] = useState<Trade[]>([])
+  const configSaving = useRef(false)
+  const configRevision = useRef(0)
+  const [statusRefresh, setStatusRefresh] = useState(0)
 
   useEffect(() => {
+    if (!admin) {
+      setSetupChecked(true)
+      return
+    }
     const checkSetup = async () => {
       try {
         const res = await authFetch(`${API_BASE}/setup/status`)
@@ -159,13 +165,21 @@ export default function App() {
       }
     }
     checkSetup()
-  }, [])
+  }, [admin])
 
   useEffect(() => {
+    let cancelled = false
     const fetchStatus = async () => {
+      if (configSaving.current) return
+      const revision = configRevision.current
       try {
-        const res = await authFetch(`${API_BASE}/status`)
+        const res = await viewerFetch('/status', admin)
+        if (!admin && res.status === 404) {
+          if (!cancelled) setError(PUBLIC_DISABLED)
+          return
+        }
         const data = await res.json()
+        if (cancelled || revision !== configRevision.current) return
         if (data.ok) {
           setStatus(data.data)
           setError(null)
@@ -173,27 +187,30 @@ export default function App() {
           setError(data.error || 'Failed to fetch status')
         }
       } catch {
+        if (cancelled || revision !== configRevision.current) return
         setError('Connection failed - is the agent running?')
       }
     }
 
     if (setupChecked && !showSetup) {
       fetchStatus()
-      const interval = setInterval(fetchStatus, 5000)
+      // Public data is cached server-side for ~10s; polling faster just re-reads the cache.
+      const interval = setInterval(fetchStatus, admin ? 5000 : 15000)
       const timeInterval = setInterval(() => setTime(new Date()), 1000)
 
       return () => {
+        cancelled = true
         clearInterval(interval)
         clearInterval(timeInterval)
       }
     }
-  }, [setupChecked, showSetup])
+  }, [admin, setupChecked, showSetup, statusRefresh])
 
   useEffect(() => {
     if (!setupChecked || showSetup) return
 
     const loadPortfolioHistory = async () => {
-      const history = await fetchPortfolioHistory(portfolioPeriod)
+      const history = await fetchPortfolioHistory(portfolioPeriod, admin)
       if (history.length > 0) {
         setPortfolioHistory(history)
       }
@@ -202,16 +219,37 @@ export default function App() {
     loadPortfolioHistory()
     const historyInterval = setInterval(loadPortfolioHistory, 60000)
     return () => clearInterval(historyInterval)
-  }, [setupChecked, showSetup, portfolioPeriod])
+  }, [admin, setupChecked, showSetup, portfolioPeriod])
+
+  useEffect(() => {
+    if (!setupChecked || showSetup) return
+
+    const loadTrades = async () => {
+      const recent = await fetchTrades(admin)
+      if (recent) setTrades(recent)
+    }
+
+    loadTrades()
+    const tradesInterval = setInterval(loadTrades, 30000)
+    return () => clearInterval(tradesInterval)
+  }, [admin, setupChecked, showSetup])
 
   const handleSaveConfig = async (config: Config) => {
-    const res = await authFetch(`${API_BASE}/config`, {
-      method: 'POST',
-      body: JSON.stringify(config),
-    })
-    const data = await res.json()
-    if (data.ok && status) {
-      setStatus({ ...status, config: data.data })
+    if (configSaving.current || !status) throw new Error('Configuration is not ready to save')
+    const previousConfig = status.config
+    configSaving.current = true
+    configRevision.current += 1
+    setStatus(current => current ? { ...current, config } : current)
+    try {
+      const savedConfig = await saveConfig(config)
+      setStatus(current => current ? { ...current, config: savedConfig } : current)
+    } catch (error) {
+      setStatus(current => current ? { ...current, config: previousConfig } : current)
+      throw error
+    } finally {
+      configSaving.current = false
+      configRevision.current += 1
+      setStatusRefresh(value => value + 1)
     }
   }
 
@@ -222,25 +260,16 @@ export default function App() {
   const logs = status?.logs || []
   const costs = status?.costs || { total_usd: 0, calls: 0, tokens_in: 0, tokens_out: 0 }
   const config = status?.config
+  // Full config is only present (and only editable) for admins.
+  const adminConfig = admin ? (config as Config | undefined) : undefined
   const isMarketOpen = status?.clock?.is_open ?? false
 
-  const startingEquity = config?.starting_equity || 100000
+  // P&L baseline: configured starting equity, else the oldest point in the loaded history.
+  const startingEquity = config?.starting_equity || portfolioHistory[0]?.equity || account?.equity || 1
   const unrealizedPl = positions.reduce((sum, p) => sum + p.unrealized_pl, 0)
   const totalPl = account ? account.equity - startingEquity : 0
   const realizedPl = totalPl - unrealizedPl
   const totalPlPct = account ? (totalPl / startingEquity) * 100 : 0
-
-  // Color palette for position lines (distinct colors for each stock)
-  const positionColors = ['cyan', 'purple', 'yellow', 'blue', 'green'] as const
-
-  // Generate mock price histories for positions (stable per session via useMemo)
-  const positionPriceHistories = useMemo(() => {
-    const histories: Record<string, number[]> = {}
-    positions.forEach(pos => {
-      histories[pos.symbol] = generateMockPriceHistory(pos.current_price, pos.unrealized_pl)
-    })
-    return histories
-  }, [positions.map(p => p.symbol).join(',')])
 
   // Chart data derived from portfolio history
   const portfolioChartData = useMemo(() => {
@@ -262,49 +291,8 @@ export default function App() {
       return { marketMarkers: undefined, marketHoursZone: undefined }
     }
     
-    const markers: { index: number; label: string; color?: string }[] = []
-    let openIndex = -1
-    let closeIndex = -1
-    
-    portfolioHistory.forEach((s, i) => {
-      const date = new Date(s.timestamp)
-      const hours = date.getHours()
-      const minutes = date.getMinutes()
-      
-      if (hours === 9 && minutes >= 30 && minutes < 45 && openIndex === -1) {
-        openIndex = i
-        markers.push({ index: i, label: 'OPEN', color: 'var(--color-hud-success)' })
-      } else if (hours === 16 && minutes === 0 && closeIndex === -1) {
-        closeIndex = i
-        markers.push({ index: i, label: 'CLOSE', color: 'var(--color-hud-error)' })
-      }
-    })
-    
-    const zone = openIndex >= 0 && closeIndex >= 0 
-      ? { openIndex, closeIndex } 
-      : undefined
-    
-    return { 
-      marketMarkers: markers.length > 0 ? markers : undefined,
-      marketHoursZone: zone
-    }
+    return getMarketHours(portfolioHistory)
   }, [portfolioHistory, portfolioPeriod])
-
-  // Normalize position price histories to % change for stacked comparison view
-  const normalizedPositionSeries = useMemo(() => {
-    return positions.map((pos, idx) => {
-      const priceHistory = positionPriceHistories[pos.symbol] || []
-      if (priceHistory.length < 2) return null
-      const startPrice = priceHistory[0]
-      // Convert to % change from start
-      const normalizedData = priceHistory.map(price => ((price - startPrice) / startPrice) * 100)
-      return {
-        label: pos.symbol,
-        data: normalizedData,
-        variant: positionColors[idx % positionColors.length],
-      }
-    }).filter(Boolean) as { label: string; data: number[]; variant: typeof positionColors[number] }[]
-  }, [positions, positionPriceHistories])
 
   // Early returns (after all hooks)
   if (showSetup) {
@@ -312,34 +300,24 @@ export default function App() {
   }
 
   if (error && !status) {
-    const isAuthError = error.includes('Unauthorized')
+    const isPublicDisabled = error === PUBLIC_DISABLED
+    const isAuthError = isPublicDisabled || error.includes('Unauthorized')
     return (
       <div className="min-h-screen bg-hud-bg flex items-center justify-center p-6">
         <Panel title={isAuthError ? "AUTHENTICATION REQUIRED" : "CONNECTION ERROR"} className="max-w-md w-full">
           <div className="text-center py-8">
             <div className="text-hud-error text-2xl mb-4">{isAuthError ? "NO TOKEN" : "OFFLINE"}</div>
-            <p className="text-hud-text-dim text-sm mb-6">{error}</p>
+            <p className="text-hud-text-dim text-sm mb-6">
+              {isPublicDisabled ? 'The public view is not enabled. Sign in as admin to continue.' : error}
+            </p>
             {isAuthError ? (
               <div className="space-y-4">
-                <div className="text-left bg-hud-panel p-4 border border-hud-line">
-                  <label className="hud-label block mb-2">API Token</label>
-                  <input
-                    type="password"
-                    className="hud-input w-full mb-2"
-                    placeholder="Enter MAHORAGA_API_TOKEN"
-                    defaultValue={localStorage.getItem('mahoraga_api_token') || ''}
-                    onChange={(e) => localStorage.setItem('mahoraga_api_token', e.target.value)}
-                  />
-                  <button 
-                    onClick={() => window.location.reload()}
-                    className="hud-button w-full"
-                  >
-                    Save & Reload
+                <AdminLogin />
+                {admin && (
+                  <button className="hud-label hover:text-hud-primary" onClick={() => { setApiToken(''); window.location.reload() }}>
+                    [CLEAR TOKEN]
                   </button>
-                </div>
-                <p className="text-hud-text-dim text-xs">
-                  Find your token in <code className="text-hud-primary">.dev.vars</code> (local) or Cloudflare secrets (deployed)
-                </p>
+                )}
               </div>
             ) : (
               <p className="text-hud-text-dim text-xs">
@@ -380,12 +358,33 @@ export default function App() {
               overnightActivity={status?.overnightActivity}
               premarketPlan={status?.premarketPlan}
             />
-            <button 
-              className="hud-label hover:text-hud-primary transition-colors"
-              onClick={() => setShowSettings(true)}
-            >
-              [CONFIG]
-            </button>
+            {admin ? (
+              <>
+                <button
+                  className="hud-label hover:text-hud-primary transition-colors"
+                  onClick={() => setShowSettings(true)}
+                >
+                  [CONFIG]
+                </button>
+                <button
+                  className="hud-label hover:text-hud-primary transition-colors"
+                  title="Sign out and see what the public sees"
+                  onClick={() => { setApiToken(''); window.location.reload() }}
+                >
+                  [LOGOUT]
+                </button>
+              </>
+            ) : (
+              <>
+                <span className="hud-label text-hud-warning border border-hud-warning/40 px-2 py-0.5">VIEW ONLY</span>
+                <button
+                  className="hud-label hover:text-hud-primary transition-colors"
+                  onClick={() => setShowLogin(true)}
+                >
+                  [ADMIN]
+                </button>
+              </>
+            )}
             <span className="hud-value-sm font-mono">
               {time.toLocaleTimeString('en-US', { hour12: false })}
             </span>
@@ -443,13 +442,11 @@ export default function App() {
                         <th className="hud-label text-right py-2 px-2 hidden sm:table-cell">Qty</th>
                         <th className="hud-label text-right py-2 px-2 hidden md:table-cell">Value</th>
                         <th className="hud-label text-right py-2 px-2">P&L</th>
-                        <th className="hud-label text-center py-2 px-2">Trend</th>
                       </tr>
                     </thead>
                     <tbody>
                       {positions.map((pos: Position) => {
                         const plPct = (pos.unrealized_pl / (pos.market_value - pos.unrealized_pl)) * 100
-                        const priceHistory = positionPriceHistories[pos.symbol] || []
                         const posEntry = status?.positionEntries?.[pos.symbol]
                         const staleness = status?.stalenessAnalysis?.[pos.symbol]
                         const holdTime = posEntry ? Math.floor((Date.now() - posEntry.entry_time) / 3600000) : null
@@ -503,11 +500,6 @@ export default function App() {
                               <div>{formatCurrency(pos.unrealized_pl)}</div>
                               <div className="text-xs opacity-70">{formatPercent(plPct)}</div>
                             </td>
-                            <td className="py-2 px-2">
-                              <div className="flex justify-center">
-                                <Sparkline data={priceHistory} width={60} height={20} />
-                              </div>
-                            </td>
                           </motion.tr>
                         )
                       })}
@@ -529,13 +521,13 @@ export default function App() {
                   label="AVG COST/CALL" 
                   value={costs.calls > 0 ? `$${(costs.total_usd / costs.calls).toFixed(6)}` : '$0'} 
                 />
-                <MetricInline label="MODEL" value={config?.llm_model || 'gpt-4o-mini'} />
+                <MetricInline label="MODEL" value={config?.llm_model || 'gpt-6-luna'} />
               </div>
             </Panel>
           </div>
 
           {/* Row 2: Portfolio Performance Chart */}
-          <div className="col-span-4 md:col-span-8 lg:col-span-8">
+          <div className="col-span-4 md:col-span-8 lg:col-span-12">
             <Panel 
               title="PORTFOLIO PERFORMANCE" 
               titleRight={
@@ -572,54 +564,6 @@ export default function App() {
               ) : (
                 <div className="h-full flex items-center justify-center text-hud-text-dim text-sm">
                   Collecting performance data...
-                </div>
-              )}
-            </Panel>
-          </div>
-
-          <div className="col-span-4 md:col-span-8 lg:col-span-4">
-            <Panel title="POSITION PERFORMANCE" titleRight="% CHANGE" className="h-[320px]">
-              {positions.length === 0 ? (
-                <div className="h-full flex items-center justify-center text-hud-text-dim text-sm">
-                  No positions to display
-                </div>
-              ) : normalizedPositionSeries.length > 0 ? (
-                <div className="h-full flex flex-col">
-                  {/* Legend */}
-                  <div className="flex flex-wrap gap-3 mb-2 pb-2 border-b border-hud-line/30 shrink-0">
-                    {positions.slice(0, 5).map((pos: Position, idx: number) => {
-                      const isPositive = pos.unrealized_pl >= 0
-                      const plPct = (pos.unrealized_pl / (pos.market_value - pos.unrealized_pl)) * 100
-                      const color = positionColors[idx % positionColors.length]
-                      return (
-                        <div key={pos.symbol} className="flex items-center gap-1.5">
-                          <div 
-                            className="w-2 h-2 rounded-full" 
-                            style={{ backgroundColor: `var(--color-hud-${color})` }}
-                          />
-                          <span className="hud-value-sm">{pos.symbol}</span>
-                          <span className={clsx('hud-label', isPositive ? 'text-hud-success' : 'text-hud-error')}>
-                            {formatPercent(plPct)}
-                          </span>
-                        </div>
-                      )
-                    })}
-                  </div>
-                  {/* Stacked chart */}
-                  <div className="flex-1 min-h-0 w-full">
-                    <LineChart
-                      series={normalizedPositionSeries.slice(0, 5)}
-                      showArea={false}
-                      showGrid={true}
-                      showDots={false}
-                      animated={false}
-                      formatValue={(v) => `${v >= 0 ? '+' : ''}${v.toFixed(1)}%`}
-                    />
-                  </div>
-                </div>
-              ) : (
-                <div className="h-full flex items-center justify-center text-hud-text-dim text-sm">
-                  Loading position data...
                 </div>
               )}
             </Panel>
@@ -699,6 +643,7 @@ export default function App() {
                       initial={{ opacity: 0 }}
                       animate={{ opacity: 1 }}
                       className="flex items-start gap-2 py-1 border-b border-hud-line/10"
+                      title={[log.reason, log.error, log.message].filter((v) => typeof v === 'string').join(' — ') || undefined}
                     >
                       <span className="text-hud-text-dim shrink-0 hidden sm:inline w-[52px]">
                         {new Date(log.timestamp).toLocaleTimeString('en-US', { hour12: false })}
@@ -706,7 +651,7 @@ export default function App() {
                       <span className={clsx('shrink-0 w-[72px] text-right', getAgentColor(log.agent))}>
                         {log.agent}
                       </span>
-                      <span className="text-hud-text flex-1 text-right wrap-break-word">
+                      <span className={clsx('flex-1 text-right wrap-break-word', getActionColor(log.action))}>
                         {log.action}
                         {log.symbol && <span className="text-hud-primary ml-1">({log.symbol})</span>}
                       </span>
@@ -809,26 +754,85 @@ export default function App() {
               </div>
             </Panel>
           </div>
+
+          {/* Row 4: Trade history straight from the broker (fills, rejections, cancels) */}
+          <div className="col-span-4 md:col-span-8 lg:col-span-12">
+            <Panel title="RECENT TRADES" titleRight={trades.length.toString()} className="max-h-96">
+              {trades.length === 0 ? (
+                <div className="text-hud-text-dim text-sm py-6 text-center">No trades yet</div>
+              ) : (
+                <div className="overflow-auto max-h-80">
+                  <table className="w-full">
+                    <thead className="sticky top-0 bg-hud-panel">
+                      <tr className="border-b border-hud-line/50">
+                        <th className="hud-label text-left py-2 px-2">Time</th>
+                        <th className="hud-label text-left py-2 px-2">Symbol</th>
+                        <th className="hud-label text-left py-2 px-2">Side</th>
+                        <th className="hud-label text-right py-2 px-2 hidden sm:table-cell">Qty</th>
+                        <th className="hud-label text-right py-2 px-2">Fill Price</th>
+                        <th className="hud-label text-right py-2 px-2 hidden md:table-cell">Value</th>
+                        <th className="hud-label text-right py-2 px-2">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {trades.map((trade, i) => {
+                        const qty = trade.filled_qty || trade.qty
+                        const value = trade.filled_avg_price !== null ? qty * trade.filled_avg_price : null
+                        return (
+                          <tr key={`${trade.submitted_at}-${trade.symbol}-${i}`} className="border-b border-hud-line/20 hover:bg-hud-line/10">
+                            <td className="hud-value-sm py-2 px-2 text-hud-text-dim whitespace-nowrap">
+                              {new Date(trade.filled_at || trade.submitted_at).toLocaleString('en-US', {
+                                month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false,
+                              })}
+                            </td>
+                            <td className="hud-value-sm py-2 px-2">{trade.symbol}</td>
+                            <td className={clsx('hud-value-sm py-2 px-2 uppercase', trade.side === 'buy' ? 'text-hud-success' : 'text-hud-error')}>
+                              {trade.side}
+                            </td>
+                            <td className="hud-value-sm text-right py-2 px-2 hidden sm:table-cell">{qty || '—'}</td>
+                            <td className="hud-value-sm text-right py-2 px-2">
+                              {trade.filled_avg_price !== null ? formatCurrency(trade.filled_avg_price) : '—'}
+                            </td>
+                            <td className="hud-value-sm text-right py-2 px-2 hidden md:table-cell">
+                              {value !== null ? formatCurrency(value) : '—'}
+                            </td>
+                            <td className={clsx('hud-label text-right py-2 px-2', getTradeStatusColor(trade.status))}>
+                              {trade.status.replace('_', ' ').toUpperCase()}
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </Panel>
+          </div>
         </div>
 
         <footer className="mt-4 pt-3 border-t border-hud-line flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
           <div className="flex flex-wrap gap-4 md:gap-6">
             {config && (
               <>
-                <MetricInline label="MAX POS" value={`$${config.max_position_value}`} />
-                <MetricInline label="MIN SENT" value={`${(config.min_sentiment_score * 100).toFixed(0)}%`} />
-                <MetricInline label="TAKE PROFIT" value={`${config.take_profit_pct}%`} />
-                <MetricInline label="STOP LOSS" value={`${config.stop_loss_pct}%`} />
-                <span className="hidden lg:inline text-hud-line">|</span>
-                <MetricInline 
-                  label="OPTIONS" 
-                  value={config.options_enabled ? 'ON' : 'OFF'} 
+                {/* Strategy thresholds are private: shown to the admin only */}
+                {adminConfig && (
+                  <>
+                    <MetricInline label="MAX POS" value={`$${adminConfig.max_position_value}`} />
+                    <MetricInline label="MIN SENT" value={`${(adminConfig.min_sentiment_score * 100).toFixed(0)}%`} />
+                    <MetricInline label="TAKE PROFIT" value={`${adminConfig.take_profit_pct}%`} />
+                    <MetricInline label="STOP LOSS" value={`${adminConfig.stop_loss_pct}%`} />
+                    <span className="hidden lg:inline text-hud-line">|</span>
+                  </>
+                )}
+                <MetricInline
+                  label="OPTIONS"
+                  value={config.options_enabled ? 'ON' : 'OFF'}
                   valueClassName={config.options_enabled ? 'text-hud-purple' : 'text-hud-text-dim'}
                 />
-                {config.options_enabled && (
+                {adminConfig?.options_enabled && (
                   <>
-                    <MetricInline label="OPT Δ" value={config.options_target_delta?.toFixed(2) || '0.35'} />
-                    <MetricInline label="OPT DTE" value={`${config.options_min_dte || 7}-${config.options_max_dte || 45}`} />
+                    <MetricInline label="OPT Δ" value={adminConfig.options_target_delta?.toFixed(2) || '0.35'} />
+                    <MetricInline label="OPT DTE" value={`${adminConfig.options_min_dte || 7}-${adminConfig.options_max_dte || 45}`} />
                   </>
                 )}
                 <span className="hidden lg:inline text-hud-line">|</span>
@@ -845,26 +849,42 @@ export default function App() {
           </div>
           <div className="flex items-center gap-4">
             <span className="hud-label hidden md:inline">AUTONOMOUS TRADING SYSTEM</span>
-            <span className="hud-value-sm">PAPER MODE</span>
+            {status?.broker && <span className="hud-label">{status.broker.toUpperCase()}</span>}
+            <span className={clsx('hud-value-sm', status?.tradingMode === 'live' ? 'text-hud-error' : '')}>
+              {status?.tradingMode === 'live' ? 'LIVE TRADING' : 'PAPER MODE'}
+            </span>
           </div>
         </footer>
       </div>
 
       <AnimatePresence>
-        {showSettings && config && (
+        {admin && showSettings && adminConfig && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
           >
-            <SettingsModal 
-              config={config} 
-              onSave={handleSaveConfig} 
-              onClose={() => setShowSettings(false)} 
+            <SettingsModal
+              config={adminConfig}
+              onSave={handleSaveConfig}
+              onClose={() => setShowSettings(false)}
             />
           </motion.div>
         )}
       </AnimatePresence>
+
+      {!admin && showLogin && (
+        <div
+          className="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Admin sign in"
+        >
+          <div className="max-w-md w-full">
+            <AdminLogin onCancel={() => setShowLogin(false)} />
+          </div>
+        </div>
+      )}
     </div>
   )
 }

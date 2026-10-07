@@ -15,7 +15,10 @@
 		"DEFAULT_MAX_DAILY_LOSS_PCT": "0.02",
 		"DEFAULT_COOLDOWN_MINUTES": "30",
 		"DEFAULT_MAX_OPEN_POSITIONS": "10",
-		"DEFAULT_APPROVAL_TTL_SECONDS": "300"
+		"DEFAULT_APPROVAL_TTL_SECONDS": "300",
+		// "true" = anyone can view status, P&L, trades and activity read-only at /
+		// (config and controls still require MAHORAGA_API_TOKEN)
+		"PUBLIC_DASHBOARD": "false"
 	},
 	// Secrets (set via `wrangler secret put <NAME>`):
 	// Required:
@@ -23,10 +26,18 @@
 	// - ALPACA_API_SECRET
 	// - MAHORAGA_API_TOKEN (API authentication - generate with: openssl rand -base64 48)
 	// - KILL_SWITCH_SECRET (emergency kill switch + approval token signing)
-	// 
+	//
+	// Broker (default: alpaca). To trade crypto spot on OKX set var BROKER_PROVIDER=okx and:
+	// - OKX_API_KEY, OKX_API_SECRET, OKX_API_PASSPHRASE
+	//     Use a dedicated sub-account key with Read + Trade only (never Withdraw),
+	//     bind it to an IP whitelist, and start with OKX_SIMULATED=true.
+	// - OKX_SIMULATED ("true" routes all requests to OKX demo trading; needs a demo-trading key)
+	// - OKX_API_BASE_URL (optional, https only):
+	//     default https://openapi.okx.com | EEA (my.okx.com) https://eea.okx.com | US/AU (app.okx.com) https://us.okx.com
+	//
 	// LLM Provider (choose one mode):
 	// - LLM_PROVIDER ("openai-raw" | "ai-sdk" | "vercel-gateway", default: "openai-raw")
-	// - LLM_MODEL (model identifier, e.g. "gpt-4o-mini" or "anthropic/claude-sonnet-4")
+	// - LLM_MODEL (model identifier, e.g. "gpt-6-luna" or "anthropic/claude-opus-5-5"; list in src/providers/llm/models.ts)
 	//
 	// Provider API Keys (based on LLM_PROVIDER mode):
 	// - OPENAI_API_KEY (for openai-raw, or ai-sdk with OpenAI models)
@@ -60,6 +71,10 @@
 			"binding": "ARTIFACTS",
 			"bucket_name": "mahoraga-artifacts"
 		}
+	],
+	// Per-IP limit for the public read-only API (/api/public/*)
+	"ratelimits": [
+		{ "name": "PUBLIC_RATE_LIMITER", "namespace_id": "1001", "simple": { "limit": 60, "period": 60 } }
 	],
 	"durable_objects": {
 		"bindings": [

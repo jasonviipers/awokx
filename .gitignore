@@ -11,6 +11,8 @@
 !.env.example
 wrangler.jsonc
 !wrangler.example.jsonc
+/wrangler.json
+.fallow/
 
 # Agent runtime files (contain personal trading data)
 agent-config.json

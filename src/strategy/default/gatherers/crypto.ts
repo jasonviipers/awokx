@@ -3,7 +3,7 @@
  */
 
 import type { Signal } from "../../../core/types";
-import { createAlpacaProviders } from "../../../providers/alpaca";
+import { createBrokerProviders } from "../../../providers/broker";
 import type { Gatherer, StrategyContext } from "../../types";
 
 async function gatherCrypto(ctx: StrategyContext): Promise<Signal[]> {
@@ -11,11 +11,11 @@ async function gatherCrypto(ctx: StrategyContext): Promise<Signal[]> {
 
   const signals: Signal[] = [];
   const symbols = ctx.config.crypto_symbols || ["BTC/USD", "ETH/USD", "SOL/USD"];
-  const alpaca = createAlpacaProviders(ctx.env);
+  const providers = createBrokerProviders(ctx.env);
 
   for (const symbol of symbols) {
     try {
-      const snapshot = await alpaca.marketData.getCryptoSnapshot(symbol);
+      const snapshot = await providers.marketData.getCryptoSnapshot(symbol);
       if (!snapshot) continue;
 
       const price = snapshot.latest_trade?.price || 0;

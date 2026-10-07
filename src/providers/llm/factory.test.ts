@@ -41,7 +41,7 @@ describe("LLM Provider Factory", () => {
         expect(provider).toBeNull();
       });
 
-      it("uses default model gpt-4o-mini", async () => {
+      it("uses default model gpt-6-luna", async () => {
         const fetchMock = vi.fn().mockResolvedValue({
           ok: true,
           json: async () => ({
@@ -63,7 +63,7 @@ describe("LLM Provider Factory", () => {
 
         const call = fetchMock.mock.calls[0] as [string, RequestInit];
         const body = JSON.parse(call[1].body as string);
-        expect(body.model).toBe("gpt-4o-mini");
+        expect(body.model).toBe("gpt-6-luna");
       });
 
       it("uses LLM_MODEL when provided", async () => {

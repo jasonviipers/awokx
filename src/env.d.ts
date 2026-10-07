@@ -2,12 +2,19 @@ export interface Env {
   DB: D1Database;
   CACHE: KVNamespace;
   ARTIFACTS: R2Bucket;
+  ASSETS?: Fetcher;
   SESSION: DurableObjectNamespace;
   MAHORAGA_HARNESS?: DurableObjectNamespace;
 
   ALPACA_API_KEY: string;
   ALPACA_API_SECRET: string;
   ALPACA_PAPER?: string;
+  BROKER_PROVIDER?: "alpaca" | "okx";
+  OKX_API_KEY: string;
+  OKX_API_SECRET: string;
+  OKX_API_PASSPHRASE: string;
+  OKX_API_BASE_URL?: string;
+  OKX_SIMULATED?: string;
   OPENAI_API_KEY?: string;
   OPENAI_BASE_URL?: string;
   ANTHROPIC_API_KEY?: string;
@@ -25,6 +32,10 @@ export interface Env {
   KILL_SWITCH_SECRET: string;
 
   ENVIRONMENT: string;
+  /** "true" exposes the read-only spectator API at /api/public/* (default off). */
+  PUBLIC_DASHBOARD?: string;
+  /** Optional Workers Rate Limiting binding for the public API (per client IP). */
+  PUBLIC_RATE_LIMITER?: { limit(options: { key: string }): Promise<{ success: boolean }> };
   FEATURE_LLM_RESEARCH: string;
   FEATURE_OPTIONS: string;
 

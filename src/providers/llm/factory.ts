@@ -2,6 +2,7 @@ import type { Env } from "../../env.d";
 import type { LLMProvider } from "../types";
 import { createAISDKProvider, SUPPORTED_PROVIDERS, type SupportedProvider } from "./ai-sdk";
 import { createCloudflareGatewayProvider } from "./cloudflare-gateway";
+import { DEFAULT_RESEARCH_MODEL } from "./models";
 import { createOpenAIProvider } from "./openai";
 
 export type LLMProviderType = "openai-raw" | "ai-sdk" | "cloudflare-gateway";
@@ -19,7 +20,7 @@ export type LLMProviderType = "openai-raw" | "ai-sdk" | "cloudflare-gateway";
  */
 export function createLLMProvider(env: Env): LLMProvider | null {
   const providerType = (env.LLM_PROVIDER as LLMProviderType) ?? "openai-raw";
-  const model = env.LLM_MODEL ?? "gpt-4o-mini";
+  const model = env.LLM_MODEL ?? DEFAULT_RESEARCH_MODEL;
   const openaiBaseUrlRaw = env.OPENAI_BASE_URL?.trim().replace(/\/+$/, "");
   const openaiBaseUrl = openaiBaseUrlRaw ? openaiBaseUrlRaw : undefined;
 

@@ -7,6 +7,7 @@
  */
 
 import type { AgentConfig, AgentState } from "../../core/types";
+import { DEFAULT_ANALYST_MODEL, DEFAULT_RESEARCH_MODEL } from "../../providers/llm/models";
 
 // ── Source weights & tuning ──────────────────────────────────────────────────
 
@@ -67,8 +68,8 @@ export const DEFAULT_CONFIG: AgentConfig = {
   stale_mid_min_gain_pct: 3,
   stale_social_volume_decay: 0.3,
   llm_provider: "openai-raw",
-  llm_model: "gpt-4o-mini",
-  llm_analyst_model: "gpt-4o",
+  llm_model: DEFAULT_RESEARCH_MODEL,
+  llm_analyst_model: DEFAULT_ANALYST_MODEL,
   llm_min_hold_minutes: 30,
   options_enabled: false,
   options_min_confidence: 0.8,

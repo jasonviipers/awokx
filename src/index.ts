@@ -2,11 +2,12 @@ import { getHarnessStub } from "./durable-objects/mahoraga-harness";
 import { checkRateLimit, incrementRequest } from "./durable-objects/session";
 import type { Env } from "./env.d";
 import { handleCronEvent } from "./jobs/cron";
+import { parseBoolean } from "./lib/utils";
 import { MahoragaMcpAgent } from "./mcp/agent";
 
+export { MahoragaHarness } from "./durable-objects/mahoraga-harness";
 export { SessionDO } from "./durable-objects/session";
 export { MahoragaMcpAgent };
-export { MahoragaHarness } from "./durable-objects/mahoraga-harness";
 
 function constantTimeCompare(a: string, b: string): boolean {
   if (a.length !== b.length) return false;
@@ -32,9 +33,58 @@ function unauthorizedResponse(): Response {
   });
 }
 
+// Public data carries no credentials, so any origin may embed it (e.g. your own website).
+const PUBLIC_CORS_HEADERS: Record<string, string> = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, OPTIONS",
+  "Access-Control-Max-Age": "86400",
+};
+
+function publicJson(body: unknown, status: number): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json", ...PUBLIC_CORS_HEADERS },
+  });
+}
+
+async function handlePublicRequest(request: Request, env: Env, url: URL): Promise<Response> {
+  if (!parseBoolean(env.PUBLIC_DASHBOARD, false)) {
+    return publicJson({ ok: false, error: "Public dashboard is disabled" }, 404);
+  }
+  if (request.method === "OPTIONS") {
+    return new Response(null, { status: 204, headers: PUBLIC_CORS_HEADERS });
+  }
+  if (request.method !== "GET") {
+    return publicJson({ ok: false, error: "Method not allowed" }, 405);
+  }
+
+  if (env.PUBLIC_RATE_LIMITER) {
+    const ip = request.headers.get("CF-Connecting-IP") ?? "unknown";
+    const { success } = await env.PUBLIC_RATE_LIMITER.limit({ key: `public:${ip}` });
+    if (!success) {
+      return publicJson({ ok: false, error: "Rate limit exceeded" }, 429);
+    }
+  }
+
+  // Fresh request: never forward client headers (Authorization etc.) or a body to the harness.
+  const harnessUrl = new URL(url.pathname.replace("/agent", ""), "http://harness");
+  harnessUrl.search = url.search;
+  const upstream = await getHarnessStub(env).fetch(new Request(harnessUrl.toString(), { method: "GET" }));
+
+  const response = new Response(upstream.body, upstream);
+  for (const [key, value] of Object.entries(PUBLIC_CORS_HEADERS)) {
+    response.headers.set(key, value);
+  }
+  return response;
+}
+
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
+
+    if (url.pathname === "/api" || url.pathname.startsWith("/api/")) {
+      url.pathname = "/agent" + url.pathname.slice(4);
+    }
 
     if (url.pathname === "/health") {
       return new Response(
@@ -50,15 +100,20 @@ export default {
     }
 
     if (url.pathname === "/") {
+      if (request.headers.get("accept")?.includes("text/html")) {
+        return env.ASSETS?.fetch(request) ?? new Response("Not found", { status: 404 });
+      }
       return new Response(
         JSON.stringify({
           name: "mahoraga",
           version: "0.3.0",
           description: "Autonomous LLM-powered trading agent on Cloudflare Workers",
           endpoints: {
+            ui: "/",
             health: "/health",
             mcp: "/mcp (auth required)",
             agent: "/agent/* (auth required)",
+            public: "/api/public/{status,history,trades} (read-only, if PUBLIC_DASHBOARD=true)",
           },
         }),
         {
@@ -74,8 +129,16 @@ export default {
       return MahoragaMcpAgent.mount("/mcp", { binding: "MCP_AGENT" }).fetch(request, env, ctx);
     }
 
-    if (url.pathname.startsWith("/agent")) {
-      if (!isAuthorized(request, env)) {
+    // Read-only spectator API (/api/public/*). Opt-in, unauthenticated, GET-only.
+    if (url.pathname.startsWith("/agent/public/")) {
+      return handlePublicRequest(request, env, url);
+    }
+
+    if (url.pathname === "/agent" || url.pathname.startsWith("/agent/")) {
+      // /agent/kill is authorized by KILL_SWITCH_SECRET inside the harness, so it
+      // must not also require MAHORAGA_API_TOKEN (the two secrets are distinct).
+      const isKill = url.pathname === "/agent/kill";
+      if (!isKill && !isAuthorized(request, env)) {
         return unauthorizedResponse();
       }
 
@@ -101,6 +164,10 @@ export default {
           body: request.body,
         })
       );
+    }
+
+    if (env.ASSETS) {
+      return env.ASSETS.fetch(request);
     }
 
     return new Response("Not found", { status: 404 });

@@ -6,6 +6,7 @@ import { createXai } from "@ai-sdk/xai";
 import { generateText } from "ai";
 import { createError, ErrorCode } from "../../lib/errors";
 import type { CompletionParams, CompletionResult, LLMProvider } from "../types";
+import { getRequestSettings, MODEL_CATALOG } from "./models";
 
 /**
  * Supported AI SDK providers and their environment variable mapping
@@ -24,11 +25,11 @@ export type SupportedProvider = keyof typeof SUPPORTED_PROVIDERS;
  * Popular models per provider for dashboard UI
  */
 export const PROVIDER_MODELS: Record<SupportedProvider, string[]> = {
-  openai: ["gpt-4o-mini", "gpt-4o", "o1", "o1-mini"],
-  anthropic: ["claude-3-7-sonnet-latest", "claude-sonnet-4-0", "claude-opus-4-1", "claude-3-5-haiku-latest"],
-  google: ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.0-flash", "gemini-3-pro-preview"],
-  xai: ["grok-4", "grok-3", "grok-4-fast-reasoning"],
-  deepseek: ["deepseek-chat", "deepseek-reasoner"],
+  openai: MODEL_CATALOG.filter((m) => m.provider === "openai").map((m) => m.id),
+  anthropic: MODEL_CATALOG.filter((m) => m.provider === "anthropic").map((m) => m.id),
+  google: MODEL_CATALOG.filter((m) => m.provider === "google").map((m) => m.id),
+  xai: MODEL_CATALOG.filter((m) => m.provider === "xai").map((m) => m.id),
+  deepseek: MODEL_CATALOG.filter((m) => m.provider === "deepseek").map((m) => m.id),
 };
 
 export interface AISDKConfig {
@@ -116,14 +117,19 @@ export class AISDKProvider implements LLMProvider {
         );
       }
 
+      // Reasoning models reject custom temperature and need room for thinking tokens.
+      const settings = getRequestSettings(`${providerName}/${modelId}`, {
+        temperature: params.temperature,
+        maxTokens: params.max_tokens,
+      });
       const result = await generateText({
         model: provider(modelId),
         messages: params.messages.map((msg) => ({
           role: msg.role,
           content: msg.content,
         })),
-        temperature: params.temperature ?? 0.7,
-        maxOutputTokens: params.max_tokens ?? 1024,
+        ...(settings.temperature !== undefined && { temperature: settings.temperature }),
+        maxOutputTokens: settings.maxTokens,
       });
 
       return {

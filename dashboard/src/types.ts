@@ -191,11 +191,39 @@ export interface PositionHistory {
   timestamps: number[]
 }
 
+/** One entry of the backend model catalog (GET /api/models). */
+export interface ModelInfo {
+  provider: 'openai' | 'anthropic' | 'google' | 'xai' | 'deepseek'
+  id: string
+  label: string
+  tier: 'smart' | 'cheap' | 'both'
+  inputPerM: number
+  outputPerM: number
+  reasoning: boolean
+}
+
+/** A broker order as shown in the trade feed (same shape for admin and public views). */
+export interface Trade {
+  symbol: string
+  side: 'buy' | 'sell'
+  type: string
+  qty: number
+  filled_qty: number
+  filled_avg_price: number | null
+  status: string
+  submitted_at: string
+  filled_at: string | null
+}
+
 export interface Status {
+  enabled?: boolean
+  broker?: string
+  tradingMode?: 'paper' | 'live'
   account: Account | null
   positions: Position[]
   clock: Clock | null
-  config: Config
+  /** Full config for admins; public viewers receive only display fields. */
+  config: Partial<Config>
   signals: Signal[]
   logs: LogEntry[]
   costs: CostTracker

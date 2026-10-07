@@ -145,6 +145,7 @@ describe("OpenAI Provider", () => {
 
       const provider = createOpenAIProvider({ apiKey: "sk-test" });
       await provider.complete({
+        model: "gpt-4o", // non-reasoning model: sampling params are sent
         messages: [{ role: "user", content: "Test" }],
       });
 

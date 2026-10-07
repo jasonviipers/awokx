@@ -7,7 +7,7 @@
  */
 
 import type { Position, ResearchResult } from "../../../core/types";
-import { createAlpacaProviders } from "../../../providers/alpaca";
+import { createBrokerProviders } from "../../../providers/broker";
 import type { StrategyContext } from "../../types";
 
 /**
@@ -25,8 +25,8 @@ export async function researchCrypto(
   }
 
   try {
-    const alpaca = createAlpacaProviders(ctx.env);
-    const snapshot = await alpaca.marketData.getCryptoSnapshot(symbol).catch(() => null);
+    const providers = createBrokerProviders(ctx.env);
+    const snapshot = await providers.marketData.getCryptoSnapshot(symbol).catch(() => null);
     const price = snapshot?.latest_trade?.price || 0;
     const dailyChange = snapshot
       ? ((snapshot.daily_bar.c - snapshot.prev_daily_bar.c) / snapshot.prev_daily_bar.c) * 100

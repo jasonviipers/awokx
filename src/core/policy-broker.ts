@@ -12,8 +12,7 @@
 import type { OrderPreview } from "../mcp/types";
 import type { PolicyConfig } from "../policy/config";
 import { type PolicyContext, PolicyEngine } from "../policy/engine";
-import type { AlpacaProviders } from "../providers/alpaca";
-import type { Account, MarketClock, Position } from "../providers/types";
+import type { Account, BrokerProvider, MarketClock, Position } from "../providers/types";
 import type { D1Client } from "../storage/d1/client";
 import type { RiskState } from "../storage/d1/queries/risk-state";
 import { getRiskState } from "../storage/d1/queries/risk-state";
@@ -21,7 +20,7 @@ import { isCryptoSymbol, normalizeCryptoSymbol } from "../strategy/default/helpe
 import type { StrategyContext } from "../strategy/types";
 
 export interface PolicyBrokerDeps {
-  alpaca: AlpacaProviders;
+  trading: BrokerProvider;
   policyConfig: PolicyConfig;
   db: D1Client | null;
   log: (agent: string, action: string, details: Record<string, unknown>) => void;
@@ -38,7 +37,7 @@ export interface PolicyBrokerDeps {
  * All orders are validated by PolicyEngine before execution.
  */
 export function createPolicyBroker(deps: PolicyBrokerDeps): StrategyContext["broker"] {
-  const { alpaca, policyConfig, db, log } = deps;
+  const { trading, policyConfig, db, log } = deps;
   const engine = new PolicyEngine(policyConfig);
 
   // Cache account/positions/clock per cycle to avoid redundant API calls
@@ -48,21 +47,21 @@ export function createPolicyBroker(deps: PolicyBrokerDeps): StrategyContext["bro
 
   async function getAccount(): Promise<Account> {
     if (!cachedAccount) {
-      cachedAccount = await alpaca.trading.getAccount();
+      cachedAccount = await trading.getAccount();
     }
     return cachedAccount;
   }
 
   async function getPositions(): Promise<Position[]> {
     if (!cachedPositions) {
-      cachedPositions = await alpaca.trading.getPositions();
+      cachedPositions = await trading.getPositions();
     }
     return cachedPositions;
   }
 
   async function getClock(): Promise<MarketClock> {
     if (!cachedClock) {
-      cachedClock = await alpaca.trading.getClock();
+      cachedClock = await trading.getClock();
     }
     return cachedClock;
   }
@@ -102,7 +101,7 @@ export function createPolicyBroker(deps: PolicyBrokerDeps): StrategyContext["bro
     // Exchange validation for equities
     if (!isCrypto && deps.allowedExchanges.length > 0) {
       try {
-        const asset = await alpaca.trading.getAsset(symbol);
+        const asset = await trading.getAsset(symbol);
         if (!asset) {
           log("PolicyBroker", "buy_blocked", { symbol, reason: "Asset not found" });
           return false;
@@ -159,7 +158,7 @@ export function createPolicyBroker(deps: PolicyBrokerDeps): StrategyContext["bro
       }
 
       // Execute
-      const alpacaOrder = await alpaca.trading.createOrder({
+      const brokerOrder = await trading.createOrder({
         symbol: orderSymbol,
         notional: Math.round(notional * 100) / 100,
         side: "buy",
@@ -170,7 +169,7 @@ export function createPolicyBroker(deps: PolicyBrokerDeps): StrategyContext["bro
       log("PolicyBroker", "buy_executed", {
         symbol: orderSymbol,
         isCrypto,
-        status: alpacaOrder.status,
+        status: brokerOrder.status,
         notional,
         reason,
       });
@@ -214,7 +213,7 @@ export function createPolicyBroker(deps: PolicyBrokerDeps): StrategyContext["bro
         }
       }
 
-      await alpaca.trading.closePosition(symbol);
+      await trading.closePosition(symbol);
       log("PolicyBroker", "sell_executed", { symbol, reason });
 
       // Invalidate cache after order

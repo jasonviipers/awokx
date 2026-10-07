@@ -66,11 +66,11 @@ describe("AI SDK Provider", () => {
 
   describe("PROVIDER_MODELS", () => {
     it("contains models for all providers", () => {
-      expect(PROVIDER_MODELS.openai).toContain("gpt-4o");
-      expect(PROVIDER_MODELS.anthropic).toContain("claude-sonnet-4-0");
-      expect(PROVIDER_MODELS.google).toContain("gemini-2.5-pro");
-      expect(PROVIDER_MODELS.xai).toContain("grok-4");
-      expect(PROVIDER_MODELS.deepseek).toContain("deepseek-chat");
+      expect(PROVIDER_MODELS.openai).toContain("gpt-6.1-sol");
+      expect(PROVIDER_MODELS.anthropic).toContain("claude-opus-5-5");
+      expect(PROVIDER_MODELS.google).toContain("gemini-3.8-flash");
+      expect(PROVIDER_MODELS.xai).toContain("grok-4.7");
+      expect(PROVIDER_MODELS.deepseek).toContain("deepseek-v4-pro");
     });
   });
 

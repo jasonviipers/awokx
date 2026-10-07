@@ -114,7 +114,7 @@ describe("Cloudflare Gateway Provider", () => {
       });
     });
 
-    it("uses default model (openai/gpt-4o-mini) when not specified", async () => {
+    it("uses default model (openai/gpt-6-luna) when not specified", async () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         json: async () => ({
@@ -130,7 +130,7 @@ describe("Cloudflare Gateway Provider", () => {
 
       const call = mockFetch.mock.calls[0] as [string, RequestInit];
       const body = JSON.parse(call[1].body as string);
-      expect(body.model).toBe("openai/gpt-4o-mini");
+      expect(body.model).toBe("openai/gpt-6-luna");
     });
 
     it("uses custom model when provided in params", async () => {
@@ -206,6 +206,7 @@ describe("Cloudflare Gateway Provider", () => {
 
       const provider = createCloudflareGatewayProvider(validConfig);
       await provider.complete({
+        model: "openai/gpt-4o", // non-reasoning model: sampling params are sent
         messages: [{ role: "user", content: "Test" }],
       });
 

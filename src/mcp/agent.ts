@@ -9,6 +9,7 @@ import { getDefaultPolicyConfig, type PolicyConfig } from "../policy/config";
 import { PolicyEngine } from "../policy/engine";
 import { createAlpacaProviders } from "../providers/alpaca";
 import { getDTE } from "../providers/alpaca/options";
+import { type BrokerProviders, createBrokerProviders } from "../providers/broker";
 import { classifyEvent, generateResearchReport, summarizeLearnedRules } from "../providers/llm/classifier";
 import { createLLMProvider } from "../providers/llm/factory";
 import { extractFinancialData, isAllowedDomain, scrapeUrl } from "../providers/scraper";
@@ -54,7 +55,9 @@ export class MahoragaMcpAgent extends McpAgent<Env> {
     this.requestId = generateId();
 
     const db = createD1Client(this.env.DB);
-    const alpaca = createAlpacaProviders(this.env);
+    // Account/order/market-data tools use the configured broker (Alpaca or OKX).
+    // Options remain Alpaca-only.
+    const broker = createBrokerProviders(this.env);
 
     const storedPolicy = await getPolicyConfig(db);
     this.policyConfig = storedPolicy ?? getDefaultPolicyConfig(this.env);
@@ -63,28 +66,28 @@ export class MahoragaMcpAgent extends McpAgent<Env> {
       this.llm = createLLMProvider(this.env);
     }
 
-    this.options = alpaca.options;
+    this.options = createAlpacaProviders(this.env).options;
 
-    this.registerAuthTools(db, alpaca);
-    this.registerAccountTools(db, alpaca);
-    this.registerPositionTools(db, alpaca);
-    this.registerOrderTools(db, alpaca);
-    this.registerRiskTools(db, alpaca);
+    this.registerAuthTools(db, broker);
+    this.registerAccountTools(db, broker);
+    this.registerPositionTools(db, broker);
+    this.registerOrderTools(db, broker);
+    this.registerRiskTools(db, broker);
     this.registerMemoryTools(db);
-    this.registerMarketDataTools(db, alpaca);
-    this.registerTechnicalTools(db, alpaca);
+    this.registerMarketDataTools(db, broker);
+    this.registerTechnicalTools(db, broker);
     this.registerEventsTools(db);
     this.registerNewsTools(db);
-    this.registerResearchTools(db, alpaca);
+    this.registerResearchTools(db, broker);
     this.registerOptionsTools();
     this.registerUtilityTools();
   }
 
-  private registerAuthTools(db: ReturnType<typeof createD1Client>, alpaca: ReturnType<typeof createAlpacaProviders>) {
+  private registerAuthTools(db: ReturnType<typeof createD1Client>, broker: BrokerProviders) {
     this.server.tool("auth-verify", "Verify that Alpaca API credentials are valid", {}, async () => {
       const startTime = Date.now();
       try {
-        const account = await alpaca.trading.getAccount();
+        const account = await broker.trading.getAccount();
         const result = success({
           verified: true,
           account_id: account.id,
@@ -132,10 +135,7 @@ export class MahoragaMcpAgent extends McpAgent<Env> {
     });
   }
 
-  private registerAccountTools(
-    db: ReturnType<typeof createD1Client>,
-    alpaca: ReturnType<typeof createAlpacaProviders>
-  ) {
+  private registerAccountTools(db: ReturnType<typeof createD1Client>, broker: BrokerProviders) {
     this.server.tool(
       "accounts-get",
       "Get detailed account information including buying power and equity",
@@ -143,7 +143,7 @@ export class MahoragaMcpAgent extends McpAgent<Env> {
       async () => {
         const startTime = Date.now();
         try {
-          const account = await alpaca.trading.getAccount();
+          const account = await broker.trading.getAccount();
           const result = success(account);
           await insertToolLog(db, {
             request_id: this.requestId,
@@ -176,9 +176,9 @@ export class MahoragaMcpAgent extends McpAgent<Env> {
         const startTime = Date.now();
         try {
           const [account, positions, clock] = await Promise.all([
-            alpaca.trading.getAccount(),
-            alpaca.trading.getPositions(),
-            alpaca.trading.getClock(),
+            broker.trading.getAccount(),
+            broker.trading.getPositions(),
+            broker.trading.getClock(),
           ]);
 
           const totalUnrealizedPl = positions.reduce((sum, p) => sum + p.unrealized_pl, 0);
@@ -232,17 +232,14 @@ export class MahoragaMcpAgent extends McpAgent<Env> {
     );
   }
 
-  private registerPositionTools(
-    db: ReturnType<typeof createD1Client>,
-    alpaca: ReturnType<typeof createAlpacaProviders>
-  ) {
+  private registerPositionTools(db: ReturnType<typeof createD1Client>, broker: BrokerProviders) {
     this.server.tool(
       "positions-list",
       "List all current positions",
       { symbol: z.string().optional() },
       async ({ symbol }) => {
         try {
-          const positions = await alpaca.trading.getPositions();
+          const positions = await broker.trading.getPositions();
           const filtered = symbol
             ? positions.filter((p) => p.symbol.toUpperCase() === symbol.toUpperCase())
             : positions;
@@ -304,7 +301,7 @@ export class MahoragaMcpAgent extends McpAgent<Env> {
             };
           }
 
-          const order = await alpaca.trading.closePosition(symbol, qty, percentage ? percentage / 100 : undefined);
+          const order = await broker.trading.closePosition(symbol, qty, percentage ? percentage / 100 : undefined);
           const result = success({
             message: `Position close order submitted`,
             order: { id: order.id, symbol: order.symbol, status: order.status },
@@ -326,7 +323,7 @@ export class MahoragaMcpAgent extends McpAgent<Env> {
     );
   }
 
-  private registerOrderTools(db: ReturnType<typeof createD1Client>, alpaca: ReturnType<typeof createAlpacaProviders>) {
+  private registerOrderTools(db: ReturnType<typeof createD1Client>, broker: BrokerProviders) {
     this.server.tool(
       "orders-preview",
       "Preview order and get approval token. Does NOT execute. Use orders-submit with the token.",
@@ -360,16 +357,16 @@ export class MahoragaMcpAgent extends McpAgent<Env> {
           }
 
           const [account, positions, clock, riskState] = await Promise.all([
-            alpaca.trading.getAccount(),
-            alpaca.trading.getPositions(),
-            alpaca.trading.getClock(),
+            broker.trading.getAccount(),
+            broker.trading.getPositions(),
+            broker.trading.getClock(),
             getRiskState(db),
           ]);
 
           let estimatedPrice = input.limit_price ?? input.stop_price;
           if (!estimatedPrice) {
             try {
-              const quote = await alpaca.marketData.getQuote(input.symbol);
+              const quote = await broker.marketData.getQuote(input.symbol);
               estimatedPrice = input.side === "buy" ? quote.ask_price : quote.bid_price;
             } catch {
               estimatedPrice = 0;
@@ -380,7 +377,7 @@ export class MahoragaMcpAgent extends McpAgent<Env> {
 
           let assetClass: "crypto" | "us_equity" = "us_equity";
           try {
-            const asset = await alpaca.trading.getAsset(input.symbol);
+            const asset = await broker.trading.getAsset(input.symbol);
             if (asset?.class === "crypto") {
               assetClass = "crypto";
             }
@@ -500,7 +497,7 @@ export class MahoragaMcpAgent extends McpAgent<Env> {
           }
 
           const orderParams = validation.order_params!;
-          const clock = await alpaca.trading.getClock();
+          const clock = await broker.trading.getClock();
           const isCrypto = orderParams.asset_class === "crypto";
           if (!isCrypto && !clock.is_open && orderParams.time_in_force === "day") {
             return {
@@ -514,7 +511,24 @@ export class MahoragaMcpAgent extends McpAgent<Env> {
             };
           }
 
-          const order = await alpaca.trading.createOrder({
+          // Claim the token before placing the order so concurrent submits can't double-execute
+          if (!(await consumeApprovalToken(db, validation.approval_id!))) {
+            return {
+              content: [
+                {
+                  type: "text" as const,
+                  text: JSON.stringify(
+                    failure({ code: ErrorCode.INVALID_APPROVAL_TOKEN, message: "Approval token already used" }),
+                    null,
+                    2
+                  ),
+                },
+              ],
+              isError: true,
+            };
+          }
+
+          const order = await broker.trading.createOrder({
             symbol: orderParams.symbol,
             qty: orderParams.qty,
             notional: orderParams.notional,
@@ -526,7 +540,6 @@ export class MahoragaMcpAgent extends McpAgent<Env> {
             client_order_id: validation.approval_id,
           });
 
-          await consumeApprovalToken(db, validation.approval_id!);
           await createTrade(db, {
             approval_id: validation.approval_id,
             alpaca_order_id: order.id,
@@ -576,7 +589,7 @@ export class MahoragaMcpAgent extends McpAgent<Env> {
       },
       async ({ status, limit }) => {
         try {
-          const orders = await alpaca.trading.listOrders({ status, limit });
+          const orders = await broker.trading.listOrders({ status, limit });
           const result = success({
             count: orders.length,
             orders: orders.map((o) => ({
@@ -606,7 +619,7 @@ export class MahoragaMcpAgent extends McpAgent<Env> {
 
     this.server.tool("orders-cancel", "Cancel an order by ID", { order_id: z.string() }, async ({ order_id }) => {
       try {
-        await alpaca.trading.cancelOrder(order_id);
+        await broker.trading.cancelOrder(order_id);
         return {
           content: [
             {
@@ -629,13 +642,13 @@ export class MahoragaMcpAgent extends McpAgent<Env> {
     });
   }
 
-  private registerRiskTools(db: ReturnType<typeof createD1Client>, alpaca: ReturnType<typeof createAlpacaProviders>) {
+  private registerRiskTools(db: ReturnType<typeof createD1Client>, broker: BrokerProviders) {
     this.server.tool("risk-status", "Get current risk status and limits", {}, async () => {
       try {
         const [riskState, account, positions] = await Promise.all([
           getRiskState(db),
-          alpaca.trading.getAccount(),
-          alpaca.trading.getPositions(),
+          broker.trading.getAccount(),
+          broker.trading.getPositions(),
         ]);
 
         const totalExposure = positions.reduce((sum, p) => sum + Math.abs(p.market_value), 0);
@@ -674,7 +687,7 @@ export class MahoragaMcpAgent extends McpAgent<Env> {
       async ({ reason }) => {
         try {
           await enableKillSwitch(db, reason);
-          await alpaca.trading.cancelAllOrders();
+          await broker.trading.cancelAllOrders();
           return {
             content: [
               {
@@ -816,8 +829,8 @@ export class MahoragaMcpAgent extends McpAgent<Env> {
         qty: z.number().positive(),
         entry_price: z.number().positive().optional(),
         trade_id: z.string().optional(),
-        signals: z.record(z.unknown()).optional(),
-        technicals: z.record(z.unknown()).optional(),
+        signals: z.record(z.string(), z.unknown()).optional(),
+        technicals: z.record(z.string(), z.unknown()).optional(),
         regime_tags: z.array(z.string()).optional(),
         notes: z.string().optional(),
       },
@@ -997,7 +1010,7 @@ export class MahoragaMcpAgent extends McpAgent<Env> {
     this.server.tool(
       "memory-set-preferences",
       "Store user trading preferences",
-      { preferences: z.record(z.unknown()) },
+      { preferences: z.record(z.string(), z.unknown()) },
       async ({ preferences }) => {
         try {
           await setPreferences(db, preferences);
@@ -1038,7 +1051,7 @@ export class MahoragaMcpAgent extends McpAgent<Env> {
     });
   }
 
-  private registerMarketDataTools(db: D1Client, alpaca: ReturnType<typeof createAlpacaProviders>) {
+  private registerMarketDataTools(db: D1Client, broker: BrokerProviders) {
     this.server.tool(
       "symbol-overview",
       "Get comprehensive overview of a symbol including price, position, and recent bars",
@@ -1047,9 +1060,9 @@ export class MahoragaMcpAgent extends McpAgent<Env> {
         const startTime = Date.now();
         try {
           const [snapshot, bars, positions] = await Promise.all([
-            alpaca.marketData.getSnapshot(symbol.toUpperCase()),
-            alpaca.marketData.getBars(symbol.toUpperCase(), "1Day", { limit: 5 }),
-            alpaca.trading.getPositions(),
+            broker.marketData.getSnapshot(symbol.toUpperCase()),
+            broker.marketData.getBars(symbol.toUpperCase(), "1Day", { limit: 5 }),
+            broker.trading.getPositions(),
           ]);
 
           const position = positions.find((p) => p.symbol.toUpperCase() === symbol.toUpperCase());
@@ -1103,7 +1116,7 @@ export class MahoragaMcpAgent extends McpAgent<Env> {
       },
       async ({ symbol, timeframe, limit }) => {
         try {
-          const bars = await alpaca.marketData.getBars(symbol.toUpperCase(), timeframe, { limit });
+          const bars = await broker.marketData.getBars(symbol.toUpperCase(), timeframe, { limit });
           return {
             content: [
               {
@@ -1132,7 +1145,7 @@ export class MahoragaMcpAgent extends McpAgent<Env> {
 
     this.server.tool("market-clock", "Get current market clock status", {}, async () => {
       try {
-        const clock = await alpaca.trading.getClock();
+        const clock = await broker.trading.getClock();
         return { content: [{ type: "text" as const, text: JSON.stringify(success(clock), null, 2) }] };
       } catch (error) {
         return {
@@ -1153,7 +1166,7 @@ export class MahoragaMcpAgent extends McpAgent<Env> {
       { symbols: z.array(z.string()).min(1).max(50) },
       async ({ symbols }) => {
         try {
-          const snapshots = await alpaca.marketData.getSnapshots(symbols.map((s) => s.toUpperCase()));
+          const snapshots = await broker.marketData.getSnapshots(symbols.map((s) => s.toUpperCase()));
           const movers = Object.entries(snapshots).map(([sym, snap]) => ({
             symbol: sym,
             price: snap.daily_bar.c,
@@ -1187,7 +1200,7 @@ export class MahoragaMcpAgent extends McpAgent<Env> {
       { symbols: z.array(z.string()).min(1).max(100) },
       async ({ symbols }) => {
         try {
-          const quotes = await alpaca.marketData.getQuotes(symbols.map((s) => s.toUpperCase()));
+          const quotes = await broker.marketData.getQuotes(symbols.map((s) => s.toUpperCase()));
           return {
             content: [
               {
@@ -1219,15 +1232,15 @@ export class MahoragaMcpAgent extends McpAgent<Env> {
           let isCrypto = symbol.includes("/");
           if (!isCrypto) {
             try {
-              const asset = await alpaca.trading.getAsset(symbol);
+              const asset = await broker.trading.getAsset(symbol);
               isCrypto = asset?.class === "crypto";
             } catch {
               /* fallback to symbol pattern */
             }
           }
           const snapshot = isCrypto
-            ? await alpaca.marketData.getCryptoSnapshot(symbol)
-            : await alpaca.marketData.getSnapshot(symbol.toUpperCase());
+            ? await broker.marketData.getCryptoSnapshot(symbol)
+            : await broker.marketData.getSnapshot(symbol.toUpperCase());
 
           const result = success({
             symbol: isCrypto ? symbol : symbol.toUpperCase(),
@@ -1254,7 +1267,7 @@ export class MahoragaMcpAgent extends McpAgent<Env> {
     );
   }
 
-  private registerTechnicalTools(_db: D1Client, alpaca: ReturnType<typeof createAlpacaProviders>) {
+  private registerTechnicalTools(_db: D1Client, broker: BrokerProviders) {
     this.server.tool(
       "technicals-get",
       "Calculate technical indicators for a symbol",
@@ -1264,7 +1277,7 @@ export class MahoragaMcpAgent extends McpAgent<Env> {
       },
       async ({ symbol, timeframe }) => {
         try {
-          const bars = await alpaca.marketData.getBars(symbol.toUpperCase(), timeframe, { limit: 250 });
+          const bars = await broker.marketData.getBars(symbol.toUpperCase(), timeframe, { limit: 250 });
           if (bars.length < 20) {
             return {
               content: [
@@ -1305,7 +1318,7 @@ export class MahoragaMcpAgent extends McpAgent<Env> {
       },
       async ({ symbol, timeframe }) => {
         try {
-          const bars = await alpaca.marketData.getBars(symbol.toUpperCase(), timeframe, { limit: 250 });
+          const bars = await broker.marketData.getBars(symbol.toUpperCase(), timeframe, { limit: 250 });
           if (bars.length < 20) {
             return {
               content: [
@@ -1362,7 +1375,7 @@ export class MahoragaMcpAgent extends McpAgent<Env> {
 
           for (const sym of symbols) {
             try {
-              const bars = await alpaca.marketData.getBars(sym.toUpperCase(), timeframe, { limit: 250 });
+              const bars = await broker.marketData.getBars(sym.toUpperCase(), timeframe, { limit: 250 });
               if (bars.length >= 20) {
                 const technicals = computeTechnicals(sym.toUpperCase(), bars);
                 const signals = detectSignals(technicals);
@@ -1597,7 +1610,7 @@ export class MahoragaMcpAgent extends McpAgent<Env> {
     );
   }
 
-  private registerResearchTools(db: D1Client, alpaca: ReturnType<typeof createAlpacaProviders>) {
+  private registerResearchTools(db: D1Client, broker: BrokerProviders) {
     this.server.tool(
       "symbol-research",
       "Generate comprehensive research report for a symbol (requires LLM feature)",
@@ -1621,9 +1634,9 @@ export class MahoragaMcpAgent extends McpAgent<Env> {
         }
         try {
           const [snapshot, bars, positions, news] = await Promise.all([
-            alpaca.marketData.getSnapshot(symbol.toUpperCase()),
-            alpaca.marketData.getBars(symbol.toUpperCase(), "1Day", { limit: 60 }),
-            alpaca.trading.getPositions(),
+            broker.marketData.getSnapshot(symbol.toUpperCase()),
+            broker.marketData.getBars(symbol.toUpperCase(), "1Day", { limit: 60 }),
+            broker.trading.getPositions(),
             queryNewsItems(db, { symbol: symbol.toUpperCase(), limit: 5 }),
           ]);
 
@@ -2053,6 +2066,23 @@ export class MahoragaMcpAgent extends McpAgent<Env> {
             };
           }
 
+          // Claim the token before placing the order so concurrent submits can't double-execute
+          if (!(await consumeApprovalToken(db, validation.approval_id!))) {
+            return {
+              content: [
+                {
+                  type: "text" as const,
+                  text: JSON.stringify(
+                    failure({ code: ErrorCode.INVALID_APPROVAL_TOKEN, message: "Approval token already used" }),
+                    null,
+                    2
+                  ),
+                },
+              ],
+              isError: true,
+            };
+          }
+
           const order = await alpaca.trading.createOrder({
             symbol: orderParams.symbol,
             qty: orderParams.qty,
@@ -2063,7 +2093,6 @@ export class MahoragaMcpAgent extends McpAgent<Env> {
             client_order_id: validation.approval_id,
           });
 
-          await consumeApprovalToken(db, validation.approval_id!);
           await createTrade(db, {
             approval_id: validation.approval_id,
             alpaca_order_id: order.id,

@@ -1,16 +1,40 @@
-import { useState } from 'react'
-import type { Config } from '../types'
+import { useEffect, useState } from 'react'
+import { API_BASE, authFetch } from '../api'
+import type { Config, ModelInfo } from '../types'
 import { Panel } from './Panel'
+
+const KNOWN_LLM_PROVIDERS = ['openai-raw', 'ai-sdk', 'cloudflare-gateway']
+
+const PROVIDER_LABELS: Record<ModelInfo['provider'], string> = {
+  openai: 'OpenAI',
+  anthropic: 'Anthropic',
+  google: 'Google',
+  xai: 'xAI',
+  deepseek: 'DeepSeek',
+}
+
+/** openai-raw takes bare OpenAI IDs; AI SDK and the gateway take "provider/id". */
+function modelValue(model: ModelInfo, llmProvider: string): string {
+  return llmProvider === 'openai-raw' ? model.id : `${model.provider}/${model.id}`
+}
+
+/** Convert a stored model value when switching between bare and "provider/id" formats. */
+function convertModelValue(value: string, toProvider: string): string {
+  if (toProvider === 'openai-raw') return value.startsWith('openai/') ? value.slice('openai/'.length) : value
+  if (KNOWN_LLM_PROVIDERS.includes(toProvider) && value && !value.includes('/')) return `openai/${value}`
+  return value
+}
 
 interface SettingsModalProps {
   config: Config
-  onSave: (config: Config) => void
+  onSave: (config: Config) => Promise<void>
   onClose: () => void
 }
 
 export function SettingsModal({ config, onSave, onClose }: SettingsModalProps) {
   const [localConfig, setLocalConfig] = useState<Config>(config)
   const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
   const [apiToken, setApiToken] = useState(localStorage.getItem('mahoraga_api_token') || '')
 
   // Note: We intentionally do NOT sync localConfig with the config prop after initial mount.
@@ -25,34 +49,98 @@ export function SettingsModal({ config, onSave, onClose }: SettingsModalProps) {
     window.location.reload()
   }
 
+  // The model list lives in the backend catalog so the UI never offers retired models.
+  const [catalog, setCatalog] = useState<ModelInfo[] | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    authFetch(`${API_BASE}/models`)
+      .then(res => res.json())
+      .then(data => {
+        if (!cancelled && data.ok && Array.isArray(data.data?.models)) setCatalog(data.data.models)
+      })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [])
+
   const handleChange = <K extends keyof Config>(key: K, value: Config[K]) => {
     setLocalConfig(prev => ({ ...prev, [key]: value }))
   }
 
+  const handleProviderChange = (llmProvider: Config['llm_provider']) => {
+    setLocalConfig(prev => ({
+      ...prev,
+      llm_provider: llmProvider,
+      llm_model: convertModelValue(prev.llm_model, llmProvider || 'openai-raw'),
+      llm_analyst_model: prev.llm_analyst_model && convertModelValue(prev.llm_analyst_model, llmProvider || 'openai-raw'),
+    }))
+  }
+
+  const renderModelOptions = (kind: 'research' | 'analyst', current: string) => {
+    const llmProvider = localConfig.llm_provider || 'openai-raw'
+    if (!catalog || !KNOWN_LLM_PROVIDERS.includes(llmProvider)) {
+      return current ? <option value={current}>{current}</option> : null
+    }
+    const models = catalog.filter(m =>
+      (kind === 'research' ? m.tier !== 'smart' : m.tier !== 'cheap') &&
+      (llmProvider !== 'openai-raw' || m.provider === 'openai'),
+    )
+    const option = (m: ModelInfo) => {
+      const value = modelValue(m, llmProvider)
+      return (
+        <option key={value} value={value}>
+          {m.label} — ${m.inputPerM} / ${m.outputPerM}
+        </option>
+      )
+    }
+    const hasCurrent = models.some(m => modelValue(m, llmProvider) === current)
+    const providers = [...new Set(models.map(m => m.provider))]
+    return (
+      <>
+        {current && !hasCurrent && <option value={current}>{current} (current, not in latest list)</option>}
+        {llmProvider === 'openai-raw'
+          ? models.map(option)
+          : providers.map(p => (
+              <optgroup key={p} label={PROVIDER_LABELS[p]}>
+                {models.filter(m => m.provider === p).map(option)}
+              </optgroup>
+            ))}
+      </>
+    )
+  }
+
+  const handleClose = () => {
+    if (!saving) onClose()
+  }
+
   const handleSave = async () => {
+    if (saving) return
     setSaving(true)
+    setSaveError(null)
     try {
       await onSave(localConfig)
       onClose()
+    } catch (error) {
+      setSaveError(`${error instanceof Error ? error.message : 'Failed to save configuration'}. The change was reverted. Your edits are kept here so you can retry.`)
     } finally {
       setSaving(false)
     }
   }
 
   return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" onClick={handleClose}>
+      {/* Pixel width on purpose: the HUD's 10px root font makes rem-based max-w-* far too narrow */}
       <Panel
         title="TRADING CONFIGURATION"
-        className="w-full max-w-2xl max-h-[90vh] overflow-auto"
+        className="w-[min(1200px,96vw)] max-h-[92vh] overflow-auto"
         titleRight={
-          <button onClick={onClose} className="hud-label hover:text-hud-primary">
+          <button onClick={handleClose} disabled={saving} className="hud-label hover:text-hud-primary">
             [ESC]
           </button>
         }
       >
         <div onClick={e => e.stopPropagation()} className="space-y-6">
           {/* API Authentication */}
-          <div className="pb-4 border-b border-hud-line">
+          <div className="pb-4 border-b border-hud-line max-w-[720px]">
             <h3 className="hud-label mb-3 text-hud-error">API Authentication (Required)</h3>
             <div className="flex gap-2">
               <input
@@ -71,8 +159,10 @@ export function SettingsModal({ config, onSave, onClose }: SettingsModalProps) {
             </p>
           </div>
 
+          {/* Settings flow into balanced columns so the modal uses the screen width */}
+          <div className="columns-1 md:columns-2 xl:columns-3 gap-10">
           {/* Position Limits */}
-          <div>
+            <div className="break-inside-avoid mb-8">
             <h3 className="hud-label mb-3 text-hud-primary">Position Limits</h3>
             <div className="grid grid-cols-2 gap-4">
               <div>
@@ -106,7 +196,7 @@ export function SettingsModal({ config, onSave, onClose }: SettingsModalProps) {
           </div>
 
           {/* Sentiment Thresholds */}
-          <div>
+            <div className="break-inside-avoid mb-8">
             <h3 className="hud-label mb-3 text-hud-primary">Sentiment Thresholds</h3>
             <div className="grid grid-cols-2 gap-4">
               <div>
@@ -133,7 +223,7 @@ export function SettingsModal({ config, onSave, onClose }: SettingsModalProps) {
           </div>
 
           {/* Risk Management */}
-          <div>
+            <div className="break-inside-avoid mb-8">
             <h3 className="hud-label mb-3 text-hud-primary">Risk Management</h3>
             <div className="grid grid-cols-2 gap-4">
               <div>
@@ -158,7 +248,7 @@ export function SettingsModal({ config, onSave, onClose }: SettingsModalProps) {
           </div>
 
           {/* Timing */}
-          <div>
+            <div className="break-inside-avoid mb-8">
             <h3 className="hud-label mb-3 text-hud-primary">Polling Intervals</h3>
             <div className="grid grid-cols-2 gap-4">
               <div>
@@ -209,7 +299,7 @@ export function SettingsModal({ config, onSave, onClose }: SettingsModalProps) {
           </div>
 
           {/* LLM Config */}
-          <div>
+            <div className="break-inside-avoid mb-8">
             <h3 className="hud-label mb-3 text-hud-primary">LLM Configuration</h3>
             <div className="grid grid-cols-1 gap-4 mb-4">
               <div>
@@ -217,7 +307,7 @@ export function SettingsModal({ config, onSave, onClose }: SettingsModalProps) {
                 <select
                   className="hud-input w-full"
                   value={localConfig.llm_provider || 'openai-raw'}
-                  onChange={e => handleChange('llm_provider', e.target.value as Config['llm_provider'])}
+                  onChange={e => handleProviderChange(e.target.value as Config['llm_provider'])}
                 >
                   <option value="openai-raw">OpenAI Direct (default)</option>
                   <option value="ai-sdk">AI SDK (5 providers)</option>
@@ -245,127 +335,29 @@ export function SettingsModal({ config, onSave, onClose }: SettingsModalProps) {
                   value={localConfig.llm_model}
                   onChange={e => handleChange('llm_model', e.target.value)}
                 >
-                  {(!localConfig.llm_provider || localConfig.llm_provider === 'openai-raw') && (
-                    <>
-                      <option value="gpt-4o-mini">gpt-4o-mini</option>
-                      <option value="gpt-3.5-turbo">gpt-3.5-turbo</option>
-                    </>
-                  )}
-                  {localConfig.llm_provider === 'ai-sdk' && (
-                    <>
-                      <optgroup label="OpenAI">
-                        <option value="openai/gpt-4o-mini">gpt-4o-mini</option>
-                        <option value="openai/gpt-3.5-turbo">gpt-3.5-turbo</option>
-                      </optgroup>
-                      <optgroup label="Anthropic">
-                        <option value="anthropic/claude-3-5-haiku-latest">claude-3.5-haiku</option>
-                      </optgroup>
-                      <optgroup label="Google">
-                        <option value="google/gemini-2.5-flash">gemini-2.5-flash</option>
-                        <option value="google/gemini-2.0-flash">gemini-2.0-flash</option>
-                      </optgroup>
-                      <optgroup label="DeepSeek">
-                        <option value="deepseek/deepseek-chat">deepseek-chat</option>
-                      </optgroup>
-                    </>
-                  )}
-                  {localConfig.llm_provider === 'cloudflare-gateway' && (
-                    <>
-                      <optgroup label="OpenAI">
-                        <option value="openai/gpt-4o-mini">gpt-4o-mini</option>
-                        <option value="openai/gpt-5-mini">gpt-5-mini</option>
-                      </optgroup>
-                      <optgroup label="Anthropic">
-                        <option value="anthropic/claude-haiku-4-5">claude-haiku-4.5</option>
-                      </optgroup>
-                      <optgroup label="Google AI Studio">
-                        <option value="google-ai-studio/gemini-2.5-flash">gemini-2.5-flash</option>
-                      </optgroup>
-                      <optgroup label="DeepSeek">
-                        <option value="deepseek/deepseek-chat">deepseek-chat</option>
-                      </optgroup>
-                    </>
-                  )}
-                  {localConfig.llm_provider &&
-                    !['openai-raw', 'ai-sdk', 'cloudflare-gateway'].includes(localConfig.llm_provider) && (
-                      <option value={localConfig.llm_model}>{localConfig.llm_model}</option>
-                    )}
+                  {renderModelOptions('research', localConfig.llm_model)}
                 </select>
               </div>
               <div>
                 <label className="hud-label block mb-1">Analyst Model (smart)</label>
                 <select
                   className="hud-input w-full"
-                  value={localConfig.llm_analyst_model || 'gpt-4o'}
+                  value={localConfig.llm_analyst_model || ''}
                   onChange={e => handleChange('llm_analyst_model', e.target.value)}
                 >
-                  {(!localConfig.llm_provider || localConfig.llm_provider === 'openai-raw') && (
-                    <>
-                      <option value="gpt-5.2-2025-12-11">GPT-5.2 (best)</option>
-                      <option value="gpt-4o">gpt-4o</option>
-                      <option value="gpt-4o-mini">gpt-4o-mini (cheaper)</option>
-                    </>
-                  )}
-                  {localConfig.llm_provider === 'ai-sdk' && (
-                    <>
-                      <optgroup label="OpenAI">
-                        <option value="openai/gpt-4o">gpt-4o</option>
-                        <option value="openai/o1">o1 (reasoning)</option>
-                        <option value="openai/o1-mini">o1-mini</option>
-                      </optgroup>
-                      <optgroup label="Anthropic">
-                        <option value="anthropic/claude-3-7-sonnet-latest">claude-3.7-sonnet (best)</option>
-                        <option value="anthropic/claude-sonnet-4-0">claude-sonnet-4</option>
-                        <option value="anthropic/claude-opus-4-1">claude-opus-4</option>
-                      </optgroup>
-                      <optgroup label="Google">
-                        <option value="google/gemini-2.5-pro">gemini-2.5-pro</option>
-                        <option value="google/gemini-3-pro-preview">gemini-3-pro (preview)</option>
-                      </optgroup>
-                      <optgroup label="xAI">
-                        <option value="xai/grok-4">grok-4</option>
-                        <option value="xai/grok-3">grok-3</option>
-                        <option value="xai/grok-4-fast-reasoning">grok-4-fast-reasoning</option>
-                      </optgroup>
-                      <optgroup label="DeepSeek">
-                        <option value="deepseek/deepseek-reasoner">deepseek-reasoner</option>
-                        <option value="deepseek/deepseek-chat">deepseek-chat</option>
-                      </optgroup>
-                    </>
-                  )}
-                  {localConfig.llm_provider === 'cloudflare-gateway' && (
-                    <>
-                      <optgroup label="OpenAI">
-                        <option value="openai/gpt-5.2">gpt-5.2 (best)</option>
-                        <option value="openai/gpt-5">gpt-5</option>
-                        <option value="openai/gpt-4o">gpt-4o</option>
-                      </optgroup>
-                      <optgroup label="Anthropic">
-                        <option value="anthropic/claude-opus-4-5">claude-opus-4.5 (best)</option>
-                        <option value="anthropic/claude-sonnet-4-5">claude-sonnet-4.5</option>
-                      </optgroup>
-                      <optgroup label="Google AI Studio">
-                        <option value="google-ai-studio/gemini-2.5-pro">gemini-2.5-pro</option>
-                      </optgroup>
-                      <optgroup label="Grok">
-                        <option value="grok/grok-4.1-fast-reasoning">grok-4.1-fast-reasoning</option>
-                        <option value="grok/grok-code-fast-1">grok-code-fast-1</option>
-                      </optgroup>
-                    </>
-                  )}
-                  {localConfig.llm_provider &&
-                    !['openai-raw', 'ai-sdk', 'cloudflare-gateway'].includes(localConfig.llm_provider) && (
-                      <option value={localConfig.llm_analyst_model || 'gpt-4o'}>
-                        {localConfig.llm_analyst_model || 'gpt-4o'}
-                      </option>
-                    )}
+                  {renderModelOptions('analyst', localConfig.llm_analyst_model || '')}
                 </select>
               </div>
             </div>
+            <p className="text-[9px] text-hud-text-dim mt-1">
+              {catalog
+                ? 'Latest models from the server catalog. Prices are USD per 1M input / output tokens.'
+                : 'Loading model list…'}
+            </p>
           </div>
 
           {/* Account Config */}
-          <div>
+            <div className="break-inside-avoid mb-8">
             <h3 className="hud-label mb-3 text-hud-primary">Account</h3>
             <div className="grid grid-cols-2 gap-4">
               <div>
@@ -382,7 +374,7 @@ export function SettingsModal({ config, onSave, onClose }: SettingsModalProps) {
           </div>
 
           {/* Options Trading */}
-          <div>
+            <div className="break-inside-avoid mb-8">
             <h3 className="hud-label mb-3 text-hud-purple">Options Trading (Beta)</h3>
             <div className="grid grid-cols-2 gap-4">
               <div className="col-span-2">
@@ -473,7 +465,7 @@ export function SettingsModal({ config, onSave, onClose }: SettingsModalProps) {
           </div>
 
           {/* Crypto Trading */}
-          <div>
+            <div className="break-inside-avoid mb-8">
             <h3 className="hud-label mb-3 text-hud-cyan">Crypto Trading (24/7)</h3>
             <div className="grid grid-cols-2 gap-4">
               <div className="col-span-2">
@@ -544,7 +536,7 @@ export function SettingsModal({ config, onSave, onClose }: SettingsModalProps) {
           </div>
 
           {/* Stale Position Management */}
-          <div>
+            <div className="break-inside-avoid mb-8">
             <h3 className="hud-label mb-3 text-hud-warning">Stale Position Management</h3>
             <div className="grid grid-cols-2 gap-4">
               <div className="col-span-2">
@@ -593,10 +585,15 @@ export function SettingsModal({ config, onSave, onClose }: SettingsModalProps) {
               </div>
             </div>
           </div>
+          </div>
 
           {/* Actions */}
-          <div className="flex justify-end gap-4 pt-4 border-t border-hud-line">
-            <button className="hud-button" onClick={onClose}>
+          {saveError && (
+            <p role="alert" className="text-hud-error text-sm">{saveError}</p>
+          )}
+          {/* Stays visible while scrolling so Save is always reachable */}
+          <div className="sticky -bottom-3 -mx-3 px-3 py-3 bg-hud-bg-panel flex justify-end gap-4 border-t border-hud-line">
+            <button className="hud-button" onClick={handleClose} disabled={saving}>
               Cancel
             </button>
             <button

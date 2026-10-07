@@ -1,5 +1,6 @@
 import { createError, ErrorCode } from "../../lib/errors";
 import type { CompletionParams, CompletionResult, LLMProvider } from "../types";
+import { DEFAULT_RESEARCH_MODEL, getRequestSettings } from "./models";
 
 export interface OpenAIConfig {
   apiKey: string;
@@ -30,17 +31,21 @@ export class OpenAIProvider implements LLMProvider {
 
   constructor(config: OpenAIConfig) {
     this.apiKey = config.apiKey;
-    this.model = config.model ?? "gpt-4o-mini";
+    this.model = config.model ?? DEFAULT_RESEARCH_MODEL;
     this.baseUrl = (config.baseUrl ?? "https://api.openai.com/v1").trim().replace(/\/+$/, "");
   }
 
   async complete(params: CompletionParams): Promise<CompletionResult> {
-    const body: Record<string, unknown> = {
-      model: params.model ?? this.model,
-      messages: params.messages,
-      temperature: params.temperature ?? 0.7,
-      max_tokens: params.max_tokens ?? 1024,
-    };
+    const model = params.model ?? this.model;
+    const settings = getRequestSettings(model, { temperature: params.temperature, maxTokens: params.max_tokens });
+    const body: Record<string, unknown> = { model, messages: params.messages };
+    if (settings.temperature === undefined) {
+      // Reasoning models reject temperature and the legacy max_tokens field.
+      body.max_completion_tokens = settings.maxTokens;
+    } else {
+      body.temperature = settings.temperature;
+      body.max_tokens = settings.maxTokens;
+    }
 
     if (params.response_format) {
       body.response_format = params.response_format;

@@ -100,6 +100,6 @@ export async function validateApprovalToken(params: {
   };
 }
 
-export async function consumeApprovalToken(db: D1Client, approvalId: string): Promise<void> {
-  await markApprovalUsed(db, approvalId);
+export async function consumeApprovalToken(db: D1Client, approvalId: string): Promise<boolean> {
+  return markApprovalUsed(db, approvalId);
 }
