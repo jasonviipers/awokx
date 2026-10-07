@@ -4,6 +4,8 @@ import type { D1Client } from "../storage/d1/client";
 import { createApproval, getApprovalByToken, markApprovalUsed } from "../storage/d1/queries/approvals";
 
 export interface GenerateApprovalParams {
+  scope: "orders" | "options";
+  broker: "alpaca" | "okx";
   preview: OrderPreview;
   policyResult: PolicyResult;
   secret: string;
@@ -18,7 +20,8 @@ export interface ApprovalTokenResult {
 }
 
 export async function generateApprovalToken(params: GenerateApprovalParams): Promise<ApprovalTokenResult> {
-  const { preview, policyResult, secret, db, ttlSeconds } = params;
+  const { policyResult, secret, db, ttlSeconds } = params;
+  const preview = { ...params.preview, approval_scope: params.scope, approval_broker: params.broker };
 
   const approvalId = generateId();
   const previewHash = await hashObject(preview);
@@ -53,6 +56,8 @@ export interface ValidateApprovalResult {
 }
 
 export async function validateApprovalToken(params: {
+  scope: "orders" | "options";
+  broker: "alpaca" | "okx";
   token: string;
   secret: string;
   db: D1Client;
@@ -93,6 +98,9 @@ export async function validateApprovalToken(params: {
   const orderParams = JSON.parse(approval.order_params_json) as OrderPreview;
   if ((await hashObject(orderParams)) !== approval.preview_hash) {
     return { valid: false, reason: "Approved order has been modified" };
+  }
+  if (orderParams.approval_scope !== params.scope || orderParams.approval_broker !== params.broker) {
+    return { valid: false, reason: "Approval token is not valid for this order endpoint and broker" };
   }
   const policyResult = JSON.parse(approval.policy_result_json) as PolicyResult;
 

@@ -412,6 +412,8 @@ export class MahoragaMcpAgent extends McpAgent<Env> {
 
           if (policyResult.allowed) {
             const approval = await generateApprovalToken({
+              scope: "orders",
+              broker: broker.name,
               preview,
               policyResult,
               secret: this.env.KILL_SWITCH_SECRET,
@@ -477,6 +479,8 @@ export class MahoragaMcpAgent extends McpAgent<Env> {
           }
 
           const validation = await validateApprovalToken({
+            scope: "orders",
+            broker: broker.name,
             token: approval_token,
             secret: this.env.KILL_SWITCH_SECRET,
             db,
@@ -498,7 +502,10 @@ export class MahoragaMcpAgent extends McpAgent<Env> {
           }
 
           const orderParams = validation.order_params!;
-          const clock = await broker.trading.getClock();
+          const [clock, account, positions, currentRiskState, storedPolicy] = await Promise.all([
+            broker.trading.getClock(), broker.trading.getAccount(), broker.trading.getPositions(),
+            getRiskState(db), getPolicyConfig(db),
+          ]);
           const isCrypto = orderParams.asset_class === "crypto";
           if (!isCrypto && !clock.is_open && orderParams.time_in_force === "day") {
             return {
@@ -510,6 +517,20 @@ export class MahoragaMcpAgent extends McpAgent<Env> {
               ],
               isError: true,
             };
+          }
+
+          let estimatedPrice = orderParams.limit_price;
+          if (orderParams.order_type !== "limit" && orderParams.order_type !== "stop_limit") {
+            const quote = await broker.marketData.getQuote(orderParams.symbol);
+            estimatedPrice = orderParams.side === "buy" ? quote.ask_price : quote.bid_price;
+          }
+          const currentPolicy = new PolicyEngine(storedPolicy ?? getDefaultPolicyConfig(this.env));
+          const policyResult = currentPolicy.evaluate({
+            order: { ...orderParams, estimated_price: estimatedPrice, estimated_cost: orderParams.notional ?? (orderParams.qty ?? 0) * (estimatedPrice ?? 0) },
+            account, positions, clock, riskState: currentRiskState,
+          });
+          if (!policyResult.allowed) {
+            return { content: [{ type: "text" as const, text: JSON.stringify(failure({ code: ErrorCode.POLICY_VIOLATION, message: "Order no longer passes current policy", details: policyResult.violations })) }], isError: true };
           }
 
           // Claim the token before placing the order so concurrent submits can't double-execute
@@ -1949,6 +1970,8 @@ export class MahoragaMcpAgent extends McpAgent<Env> {
 
           if (policyResult.allowed) {
             const approval = await generateApprovalToken({
+              scope: "options",
+              broker: "alpaca",
               preview: {
                 symbol: input.contract_symbol.toUpperCase(),
                 asset_class: "us_equity",

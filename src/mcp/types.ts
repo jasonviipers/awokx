@@ -36,6 +36,8 @@ export interface PolicyResult {
 }
 
 export interface OrderPreview {
+  approval_scope?: "orders" | "options";
+  approval_broker?: "alpaca" | "okx";
   symbol: string;
   asset_class: "us_equity" | "crypto";
   side: "buy" | "sell";
